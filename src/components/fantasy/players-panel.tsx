@@ -43,6 +43,7 @@ import {
 } from '@/components/fantasy/player-rating';
 import { getProjections, projectedPoints, projectionKey, type ProjectionMap } from '@/lib/fantasy/projections';
 import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
+import { contestDivision, divisionLabel } from '@/lib/fantasy/competitions';
 
 type Filter = 'all' | 'available' | 'mine';
 
@@ -300,6 +301,8 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
   const filteredRows = showRanked ? matchingRows.slice(0, rankedShown) : matchingRows;
 
   const showAvailableFilter = isDrafted;
+  const division = contestDivision(contest.settings);
+  const poolLabel = `${contest.competitionDef.shortLabel}${division === 'all' ? '' : ` ${divisionLabel(division)}`}`;
 
   const [dropSheetPlayer, setDropSheetPlayer] = useState<{ playerId: string; playerName: string } | null>(null);
   const [claimPlayer, setClaimPlayer] = useState<{ playerId: string; playerName: string } | null>(null);
@@ -312,7 +315,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Search the ${contest.competitionDef.shortLabel} player pool`}
+          placeholder={`Search the ${poolLabel} player pool`}
           aria-label="Search players"
           className={[
             'w-full px-3.5 py-2.5 rounded-card-sm bg-ink/5',
@@ -344,7 +347,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
               : `No players found for "${query.trim()}"`
             : showMyTeamDefault || (showRanked && filter === 'mine')
               ? 'No players on your team yet.'
-              : `Search the ${contest.competitionDef.shortLabel} player pool`}
+              : `Search the ${poolLabel} player pool`}
         </p>
       ) : (
         <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">

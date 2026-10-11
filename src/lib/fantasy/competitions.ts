@@ -28,6 +28,10 @@ export type ContestMode = 'weekly-stats' | 'event';
 /** Which player pool a contest drafts from = fantasy_roster_slots.player_league. */
 export type FantasyPlayerLeague = 'ufa' | 'pul' | 'wul' | 'usau' | 'wfdf' | 'euf';
 
+/** Which slice of a USAU Nationals pool a league drafts from: 'all' = every
+ *  division at the event, otherwise only players on that division's teams. */
+export type FantasyDivision = 'all' | 'men' | 'women' | 'mixed';
+
 export interface WeeklyStatsSettings {
   mode: 'weekly-stats';
   offenders: number;
@@ -63,6 +67,10 @@ export interface EventSettings {
   draft?: boolean;
   /** See WeeklyStatsSettings.draftType. */
   draftType?: 'snake' | 'auction';
+  /** Division the league drafts from (competitions with supportedDivisions
+   *  only). Absent = 'all' — read it through contestDivision. Set once at
+   *  creation; there is no edit after that. */
+  division?: FantasyDivision;
 }
 
 export type ContestSettings = WeeklyStatsSettings | EventSettings;
@@ -110,6 +118,40 @@ export const DEFAULT_MAX_TEAMS = 12;
  *  last, ∞, is stored as unlimitedTeams with maxTeams DEFAULT_MAX_TEAMS
  *  (fantasy_set_contest_limits range-checks maxTeams even when unlimited). */
 export const TEAM_LIMIT_STOPS = [4, 5, 6, 7, 8, 9, 10, 12, 16, Infinity];
+
+/** Divisions a league can draft from, per competition. College Nationals has no
+ *  Mixed. Competitions not listed have no division choice. */
+const DIVISIONS_BY_COMPETITION: Partial<Record<CompetitionId, FantasyDivision[]>> = {
+  'usau-club-nationals': ['all', 'men', 'women', 'mixed'],
+  'usau-college-nationals': ['all', 'men', 'women'],
+};
+
+/** [] when the competition has no division choice. */
+export function supportedDivisions(id: CompetitionId): FantasyDivision[] {
+  return DIVISIONS_BY_COMPETITION[id] ?? [];
+}
+
+const DIVISION_LABELS: Record<FantasyDivision, string> = {
+  all: 'All divisions',
+  men: "Men's",
+  women: "Women's",
+  mixed: 'Mixed',
+};
+
+export function divisionLabel(division: FantasyDivision): string {
+  return DIVISION_LABELS[division];
+}
+
+/** A contest's division; absent (and every weekly-stats contest) is 'all'. */
+export function contestDivision(settings: ContestSettings): FantasyDivision {
+  return settings.mode === 'event' ? (settings.division ?? 'all') : 'all';
+}
+
+/** " · Men's" to append after a game label; "" for All. */
+export function divisionSuffix(settings: ContestSettings): string {
+  const division = contestDivision(settings);
+  return division === 'all' ? '' : ` · ${divisionLabel(division)}`;
+}
 
 export const COMPETITIONS: CompetitionDef[] = [
   {
@@ -235,6 +277,7 @@ export function parseContestSettings(def: CompetitionDef, raw: unknown): Contest
       unlimitedTeams: typeof obj.unlimitedTeams === 'boolean' ? obj.unlimitedTeams : undefined,
       draft: obj.draft === true,
       draftType,
+      division: obj.division === 'men' || obj.division === 'women' || obj.division === 'mixed' ? obj.division : undefined,
     };
   }
   return def.defaultSettings;

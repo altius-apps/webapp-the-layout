@@ -44,6 +44,11 @@ const SCORING = {
 
 const EVENT_SCORING = { goal: 3, assist: 3, callahan: 5 } as const;
 
+// USAU/WFDF/EUCS player ids are uuids (usau_player_event_stats.player_id,
+// wfdf_rosters.id, euf_rosters.id): one junk id in an .in() list makes
+// PostgREST 400 the whole query.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 function placementBonus(placement: number | null | undefined): number {
   if (placement == null || placement < 1) return 0;
   if (placement === 1) return 30;
@@ -301,7 +306,8 @@ async function usauEventPoints(
   playerIds: string[],
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  if (playerIds.length === 0) return out;
+  const ids = playerIds.filter((id) => UUID_RE.test(id));
+  if (ids.length === 0) return out;
 
   // NO placement bonus for USAU in v1: usau_event_teams.final_placement
   // coverage is sparse/inconsistent (verified 2026-08-15 — e.g. 42/48 at 2025
@@ -310,7 +316,7 @@ async function usauEventPoints(
   // derivation is built. WFDF keeps its bonus (final_standing is complete).
 
   // Event stat totals (G/A only — that's all USAU publishes).
-  for (const part of chunk(playerIds, 150)) {
+  for (const part of chunk(ids, 150)) {
     const stats = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('usau_player_event_stats')
@@ -334,11 +340,12 @@ async function eufEventPoints(
   playerIds: string[],
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  if (playerIds.length === 0) return out;
+  const ids = playerIds.filter((id) => UUID_RE.test(id));
+  if (ids.length === 0) return out;
 
   // No placement bonus for EUF in v1 — mirrors USAU (no final-standing data
   // ingested for EUCS yet). G/A only.
-  for (const part of chunk(playerIds, 150)) {
+  for (const part of chunk(ids, 150)) {
     const rows = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('euf_rosters')
@@ -362,7 +369,8 @@ async function wfdfEventPoints(
   playerIds: string[],
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
-  if (playerIds.length === 0) return out;
+  const ids = playerIds.filter((id) => UUID_RE.test(id));
+  if (ids.length === 0) return out;
 
   const teams = await fetchAll<{ id: string; final_standing: number | null }>((from, to) =>
     supabase
@@ -374,7 +382,7 @@ async function wfdfEventPoints(
   );
   const standingOf = new Map(teams.map((t) => [t.id, t.final_standing]));
 
-  for (const part of chunk(playerIds, 150)) {
+  for (const part of chunk(ids, 150)) {
     const rows = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('wfdf_rosters')
@@ -424,7 +432,7 @@ async function run(body: { contest?: string }) {
     if (body.contest) q = q.eq('id', body.contest);
     return q;
   });
-  if (contests.length === 0) return { contestsScored: 0, rowsUpserted: 0, note: 'no contests', tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
+  if (contests.length === 0) return { contestsScored: 0, contestsFailed: [] as string[], rowsUpserted: 0, note: 'no contests', tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
 
   // 3. Locked periods per contest.
   const periods = await fetchAll<PeriodRow>((from, to) =>
@@ -506,70 +514,82 @@ async function run(body: { contest?: string }) {
 
   // 6. Score contest by contest (stat contexts cached per competition+season).
   const weeklyCache = new Map<string, WeekLines>();
+  // comp:season stat loads that threw this run: the other contests on them
+  // fail fast instead of re-running the failing query.
+  const failedLines = new Set<string>();
   const upserts: { team_id: string; week: string; points: number; computed_at: string }[] = [];
   let contestsScored = 0;
+  // One contest's bad data must not block every other league's scores.
+  const contestsFailed: string[] = [];
 
   for (const contest of contests) {
     const byTeam = work.get(contest.id);
     if (!byTeam || byTeam.size === 0) continue;
     contestsScored += 1;
     const comp = contest.competition;
-
-    if (comp === 'ufa' || comp === 'pul' || comp === 'wul') {
-      const cacheKey = `${comp}:${contest.season_year}`;
-      let lines = weeklyCache.get(cacheKey);
-      if (!lines) {
-        lines =
-          comp === 'ufa'
-            ? await ufaWeekLines(supabase, contest.season_year)
-            : comp === 'pul'
-              ? await pulWeekLines(supabase, contest.season_year)
-              : await wulWeekLines(supabase, contest.season_year);
-        weeklyCache.set(cacheKey, lines);
-      }
-      for (const [teamId, byPeriod] of byTeam) {
-        for (const [period, roster] of byPeriod) {
-          const per = lines.get(period);
-          let points = 0;
-          for (const slot of roster) {
-            if (slot.role === 'flex') continue; // not valid in weekly mode
-            const line = per?.get(slot.player_id);
-            if (line) points += scoreStatLine(line, slot.role);
+    try {
+      if (comp === 'ufa' || comp === 'pul' || comp === 'wul') {
+        const cacheKey = `${comp}:${contest.season_year}`;
+        let lines = weeklyCache.get(cacheKey);
+        if (!lines) {
+          if (failedLines.has(cacheKey)) throw new Error(`${cacheKey} stats already failed this run`);
+          failedLines.add(cacheKey);
+          lines =
+            comp === 'ufa'
+              ? await ufaWeekLines(supabase, contest.season_year)
+              : comp === 'pul'
+                ? await pulWeekLines(supabase, contest.season_year)
+                : await wulWeekLines(supabase, contest.season_year);
+          failedLines.delete(cacheKey);
+          weeklyCache.set(cacheKey, lines);
+        }
+        for (const [teamId, byPeriod] of byTeam) {
+          for (const [period, roster] of byPeriod) {
+            const per = lines.get(period);
+            let points = 0;
+            for (const slot of roster) {
+              if (slot.role === 'flex') continue; // not valid in weekly mode
+              const line = per?.get(slot.player_id);
+              if (line) points += scoreStatLine(line, slot.role);
+            }
+            upserts.push({
+              team_id: teamId,
+              week: period,
+              points: Math.round(points * 100) / 100,
+              computed_at: new Date().toISOString(),
+            });
           }
-          upserts.push({
-            team_id: teamId,
-            week: period,
-            points: Math.round(points * 100) / 100,
-            computed_at: new Date().toISOString(),
-          });
+        }
+      } else {
+        // Event mode.
+        const eventId = contest.settings?.eventId;
+        if (!eventId) {
+          console.error(`[score-fantasy] contest ${contest.id} (${comp}) has no eventId — skipped`);
+          continue;
+        }
+        const playerIds = [...(playersByContest.get(contest.id) ?? [])];
+        const pointsOf =
+          comp === 'wfdf-wucc'
+            ? await wfdfEventPoints(supabase, eventId, playerIds)
+            : comp === 'eucs'
+              ? await eufEventPoints(supabase, eventId, playerIds)
+              : await usauEventPoints(supabase, eventId, playerIds);
+        for (const [teamId, byPeriod] of byTeam) {
+          for (const [period, roster] of byPeriod) {
+            let points = 0;
+            for (const slot of roster) points += pointsOf.get(slot.player_id) ?? 0;
+            upserts.push({
+              team_id: teamId,
+              week: period,
+              points: Math.round(points * 100) / 100,
+              computed_at: new Date().toISOString(),
+            });
+          }
         }
       }
-    } else {
-      // Event mode.
-      const eventId = contest.settings?.eventId;
-      if (!eventId) {
-        console.error(`[score-fantasy] contest ${contest.id} (${comp}) has no eventId — skipped`);
-        continue;
-      }
-      const playerIds = [...(playersByContest.get(contest.id) ?? [])];
-      const pointsOf =
-        comp === 'wfdf-wucc'
-          ? await wfdfEventPoints(supabase, eventId, playerIds)
-          : comp === 'eucs'
-            ? await eufEventPoints(supabase, eventId, playerIds)
-            : await usauEventPoints(supabase, eventId, playerIds);
-      for (const [teamId, byPeriod] of byTeam) {
-        for (const [period, roster] of byPeriod) {
-          let points = 0;
-          for (const slot of roster) points += pointsOf.get(slot.player_id) ?? 0;
-          upserts.push({
-            team_id: teamId,
-            week: period,
-            points: Math.round(points * 100) / 100,
-            computed_at: new Date().toISOString(),
-          });
-        }
-      }
+    } catch (err) {
+      console.error(`[score-fantasy] contest ${contest.id} (${comp}) failed:`, err);
+      contestsFailed.push(contest.id);
     }
   }
 
@@ -585,8 +605,14 @@ async function run(body: { contest?: string }) {
   let matchupsUpdated = 0;
   const decidedMatchupIds: string[] = []; // rows this run set scored=true → matchup_result pushes
   const decidedRows: Array<{ contest: ContestRow; matchup: Record<string, any>; period: string; homePts: number; awayPts: number; winnerTeamId: string | null }> = [];
+  // A contest that failed to score this run must not finalize matchups on its
+  // stale scores.
+  const failed = new Set(contestsFailed);
   const h2hContests = contests.filter(
-    (c) => (c.competition === 'ufa' || c.competition === 'pul' || c.competition === 'wul') && c.settings?.format === 'h2h',
+    (c) =>
+      !failed.has(c.id) &&
+      (c.competition === 'ufa' || c.competition === 'pul' || c.competition === 'wul') &&
+      c.settings?.format === 'h2h',
   );
 
   if (h2hContests.length > 0) {
@@ -830,7 +856,7 @@ async function run(body: { contest?: string }) {
     }
   }
 
-  return { contestsScored, rowsUpserted: upserts.length, matchupsUpdated, matchupsDecided: decidedMatchupIds.length, tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
+  return { contestsScored, contestsFailed, rowsUpserted: upserts.length, matchupsUpdated, matchupsDecided: decidedMatchupIds.length, tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
 }
 
 // verify_jwt only proves the bearer token was signed by this project — any
@@ -876,7 +902,11 @@ Deno.serve(async (req) => {
 
   try {
     const result = await run(body);
-    return new Response(JSON.stringify({ ok: true, ...result }), {
+    // Other contests were still scored; a 500 keeps the cron health check
+    // flagging the ones that weren't.
+    const ok = result.contestsFailed.length === 0;
+    return new Response(JSON.stringify({ ok, ...result }), {
+      status: ok ? 200 : 500,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {

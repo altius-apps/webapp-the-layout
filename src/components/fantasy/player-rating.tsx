@@ -22,8 +22,9 @@ export function ratingToHit(r: PlayerRating): FantasyPlayerHit {
 }
 
 /** "#12 · Proj 22.4 · 15.3 G+A per event · 11× Nationals" on one truncating
- *  line. The rank is the overall rank (gaps appear as players are drafted),
- *  never the list position. `compact` drops the why. */
+ *  line. The rank is the contest's rank — within the division in a division
+ *  league (gaps appear as players are drafted), never the list position.
+ *  `compact` drops the why. */
 export function RatingLine({ rating, compact = false }: { rating: PlayerRating | undefined; compact?: boolean }) {
   if (!rating) return null;
   const proj = projectedEventPoints(rating);

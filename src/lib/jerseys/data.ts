@@ -6,14 +6,17 @@
 // `string | null` — an error MESSAGE to show the user, or null on success.
 // These never throw, so callers don't need try/catch around each one.
 //
-// MODERATION: we call moderateName() here for fast feedback, but unlike the
+// MODERATION: we call moderateText() here for fast feedback, but unlike the
 // rest of the app that is NOT the only guard — jersey text also passes a
-// database trigger (jersey_text_is_clean), so a raw REST POST can't bypass it.
+// database trigger (ugc_text_is_clean), so a raw REST POST can't bypass it.
+// Both let real player names through ("Evan Coon"), checked against our data,
+// except in team/league names.
 // The client list is broader; the DB list is the floor. See
 // 20260802160000_jersey_listings_core.sql.
 
 import { createClient } from '@/lib/supabase/client';
 import { moderateName } from '@/lib/moderation';
+import { moderateText } from '@/lib/moderation-players';
 import {
   STORAGE_BUCKET,
   MAX_PHOTOS,
@@ -55,8 +58,16 @@ function cleanText(v: string | null | undefined, max: number): string | null {
   return t.slice(0, max);
 }
 
+// Team and league names are the user's own text, so they get no real-player
+// exemption (same as the DB triggers).
+function moderateField(value: string, label: string): Promise<string | null> {
+  return label === 'Team' || label === 'League'
+    ? Promise.resolve(moderateName(value, label))
+    : moderateText(value, label);
+}
+
 /** Runs the client profanity filter over every free-text field a draft carries. */
-function moderateDraft(d: ListingDraft): string | null {
+async function moderateDraft(d: ListingDraft): Promise<string | null> {
   const checks: [string | null | undefined, string][] = [
     [d.title, 'Title'],
     [d.description, 'Description'],
@@ -66,13 +77,13 @@ function moderateDraft(d: ListingDraft): string | null {
   ];
   for (const [value, label] of checks) {
     if (value) {
-      const err = moderateName(value, label);
+      const err = await moderateField(value, label);
       if (err) return err;
     }
   }
   for (const e of d.events ?? []) {
     if (e.name) {
-      const err = moderateName(e.name, 'Event');
+      const err = await moderateText(e.name, 'Event');
       if (err) return err;
     }
   }
@@ -85,7 +96,7 @@ export async function createListing(
   const title = cleanText(draft.title, MAX_TITLE);
   if (!title || title.length < 3) return { error: 'Give your listing a title.', id: null };
 
-  const profanity = moderateDraft(draft);
+  const profanity = await moderateDraft(draft);
   if (profanity) return { error: profanity, id: null };
 
   const db = createClient() as any;
@@ -131,7 +142,7 @@ export async function updateListing(id: string, draft: ListingDraft): Promise<st
   const title = cleanText(draft.title, MAX_TITLE);
   if (!title || title.length < 3) return 'Give your listing a title.';
 
-  const profanity = moderateDraft(draft);
+  const profanity = await moderateDraft(draft);
   if (profanity) return profanity;
 
   const db = createClient() as any;
@@ -225,7 +236,7 @@ export async function createWant(
     [draft.playerName, 'Player'],
   ] as [string | null | undefined, string][]) {
     if (v) {
-      const err = moderateName(v, label);
+      const err = await moderateField(v, label);
       if (err) return { error: err, id: null };
     }
   }
@@ -276,7 +287,7 @@ export async function updateWant(id: string, draft: WantDraft): Promise<string |
     [draft.playerName, 'Player'],
   ] as [string | null | undefined, string][]) {
     if (v) {
-      const err = moderateName(v, label);
+      const err = await moderateField(v, label);
       if (err) return err;
     }
   }

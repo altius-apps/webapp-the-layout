@@ -21,7 +21,7 @@ import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { scoreStatLine, roundPoints, type FantasyRole } from './scoring';
 import type { FantasyPlayerHit } from './data';
 import { getContestPeriods, periodsToWeeks, type ContestView } from './leagues';
-import type { FantasyPlayerLeague } from './competitions';
+import { contestDivision, type FantasyDivision, type FantasyPlayerLeague } from './competitions';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -117,6 +117,13 @@ async function poolFirstSeason(table: 'pul_players' | 'wul_players', seasonYear:
   return (data?.season as number | undefined) ?? seasonYear;
 }
 
+/** usau_teams.gender_division value for each non-'all' league division. */
+const USAU_GENDER_DIVISION: Record<Exclude<FantasyDivision, 'all'>, string> = {
+  men: 'Men',
+  women: 'Women',
+  mixed: 'Mixed',
+};
+
 export async function searchContestPlayers(
   contest: ContestView,
   query: string,
@@ -196,12 +203,18 @@ export async function searchContestPlayers(
     // and the broadest 2-char query ("an": 387 at 2026 Club Nats) fits under
     // the 1000-row cap, so ranking sees every match. Roster-driven on purpose:
     // driving from usau_players seq-scans its 400k rows on 2-char queries.
-    const { data, error } = await anon()
+    // A division league keeps only rosters on that division's teams (the team
+    // join turns inner only then, so an All league never loses a row to it).
+    const division = contestDivision(contest.settings);
+    let rosterQuery = anon()
       .from('usau_rosters')
-      .select('player_id, team_id, usau_players!inner (display_name), usau_teams:team_id (name)')
+      .select(
+        `player_id, team_id, usau_players!inner (display_name), usau_teams:team_id${division === 'all' ? '' : '!inner'} (name)`,
+      )
       .eq('event_id', eventId)
-      .ilike('usau_players.display_name', `%${likeWords(needle)}%`)
-      .limit(1000);
+      .ilike('usau_players.display_name', `%${likeWords(needle)}%`);
+    if (division !== 'all') rosterQuery = rosterQuery.eq('usau_teams.gender_division', USAU_GENDER_DIVISION[division]);
+    const { data, error } = await rosterQuery.limit(1000);
     if (error) throw error;
     const hits = (data ?? []).map((raw: Record<string, unknown>) => {
       const p = raw.usau_players as { display_name?: string } | null;

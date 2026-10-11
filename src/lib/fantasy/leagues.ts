@@ -24,9 +24,11 @@ import {
   MIN_TEAMS,
   getCompetition,
   parseContestSettings,
+  supportedDivisions,
   type CompetitionDef,
   type CompetitionId,
   type ContestSettings,
+  type FantasyDivision,
 } from './competitions';
 import type { FantasyWeek } from './weeks';
 import type { LeaderboardRow } from './data';
@@ -658,6 +660,9 @@ export interface ContestSetup {
   /** 4–16, or Infinity for no cap (stored like Settings → Teams' ∞). */
   maxTeams?: number;
   draftType?: 'snake' | 'auction';
+  /** USAU Nationals only: which division the draft pool is. 'all' (or absent)
+   *  stores nothing — an absent key already means every division. */
+  division?: FantasyDivision;
 }
 
 /** The settings keys `setup` contributes, after checking them against the same
@@ -680,6 +685,12 @@ function setupSettings(setup: ContestSetup): Record<string, unknown> {
     }
     out.draftType = setup.draftType;
   }
+  if (setup.division !== undefined) {
+    if (!['all', 'men', 'women', 'mixed'].includes(setup.division)) {
+      throw new Error('Division must be all, men, women or mixed.');
+    }
+    if (setup.division !== 'all') out.division = setup.division;
+  }
   return out;
 }
 
@@ -699,6 +710,11 @@ export async function createContest(
   const def = getCompetition(competition);
   if (!def) throw new Error('Unknown competition.');
   const picked = setup ? setupSettings(setup) : {};
+  // setupSettings can't see the competition; the INSERT is unchecked jsonb, so
+  // a division the game doesn't have (college + mixed) must stop here.
+  if (picked.division && !supportedDivisions(competition).includes(picked.division as FantasyDivision)) {
+    throw new Error(`${def.label} doesn't have that division.`);
+  }
 
   const supabase = sessionClient();
   const {
@@ -812,8 +828,9 @@ export async function createContestTeam(
 }
 
 /** Give the signed-in member a team in this contest if they have none, named
- *  after their display name (renamed later in Settings). Non-members and
- *  signed-out viewers are a no-op. Returns true when it created the team. */
+ *  after their display name (renamed later in Settings). Non-members,
+ *  signed-out viewers and members without a usable display name (the name
+ *  prompt is up) are a no-op. Returns true when it created the team. */
 export async function ensureMyContestTeam(contestId: string, leagueId: string, seasonYear: number): Promise<boolean> {
   const supabase = sessionClient();
   const {
@@ -823,15 +840,16 @@ export async function ensureMyContestTeam(contestId: string, leagueId: string, s
   const [role, mine] = await Promise.all([getMyLeagueRole(leagueId), getMyContestTeam(contestId)]);
   if (!role || mine) return false;
   // Read from the DB, not useAuth: right after signup the auth profile may
-  // still be loading, and its fallback is the email prefix.
+  // still be loading or have failed to load.
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('display_name, username')
+    .select('display_name')
     .eq('id', user.id)
     .single();
   if (error) throw error;
-  const name = ((profile.display_name as string | null)?.trim() || (profile.username as string | null) || 'My Team').slice(0, 40);
-  await createContestTeam(contestId, name, seasonYear);
+  const displayName = (profile.display_name as string | null)?.trim();
+  if (!displayName || moderateName(displayName)) return false;
+  await createContestTeam(contestId, displayName.slice(0, 40), seasonYear);
   return true;
 }
 

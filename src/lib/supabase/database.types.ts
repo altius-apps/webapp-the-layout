@@ -669,6 +669,72 @@ export type Database = {
           },
         ]
       }
+      fantasy_player_ratings: {
+        Row: {
+          avg_assists: number
+          avg_goals: number
+          computed_at: string
+          division: string | null
+          division_rank: number | null
+          elite_select_events: number
+          event_id: string
+          nationals: number
+          player_id: string
+          player_league: string
+          player_name: string
+          pro_elite_events: number
+          rank: number
+          score: number | null
+          select_events: number
+          stat_events: number
+          team_name: string | null
+          tct_events: number
+          tier: string
+        }
+        Insert: {
+          avg_assists: number
+          avg_goals: number
+          computed_at?: string
+          division?: string | null
+          division_rank?: number | null
+          elite_select_events: number
+          event_id: string
+          nationals: number
+          player_id: string
+          player_league: string
+          player_name: string
+          pro_elite_events: number
+          rank: number
+          score?: number | null
+          select_events: number
+          stat_events: number
+          team_name?: string | null
+          tct_events: number
+          tier: string
+        }
+        Update: {
+          avg_assists?: number
+          avg_goals?: number
+          computed_at?: string
+          division?: string | null
+          division_rank?: number | null
+          elite_select_events?: number
+          event_id?: string
+          nationals?: number
+          player_id?: string
+          player_league?: string
+          player_name?: string
+          pro_elite_events?: number
+          rank?: number
+          score?: number | null
+          select_events?: number
+          stat_events?: number
+          team_name?: string | null
+          tct_events?: number
+          tier?: string
+        }
+        Relationships: []
+      }
       fantasy_roster_slots: {
         Row: {
           created_at: string

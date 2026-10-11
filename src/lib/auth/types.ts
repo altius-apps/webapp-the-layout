@@ -23,7 +23,7 @@ export interface Profile {
 export interface SessionUser {
   id: string;
   email: string;
-  /** Display name pulled from profile, falling back to email local-part. */
+  /** Display name pulled from profile, falling back to "Player". */
   name: string;
   /** Two-letter initials derived from display name. */
   initials: string;

@@ -10,7 +10,7 @@
 // match the parent listing/want's poster, and the parent must be active.
 
 import { createClient } from '@/lib/supabase/client';
-import { moderateName } from '@/lib/moderation';
+import { moderateText } from '@/lib/moderation-players';
 import { MAX_MESSAGE } from './types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -70,7 +70,7 @@ export async function sendMessage(threadId: string, body: string): Promise<strin
   const text = body.trim().slice(0, MAX_MESSAGE);
   if (!text) return null;
 
-  const profanity = moderateName(text, 'Message');
+  const profanity = await moderateText(text, 'Message');
   if (profanity) return profanity;
 
   const db = createClient() as any;

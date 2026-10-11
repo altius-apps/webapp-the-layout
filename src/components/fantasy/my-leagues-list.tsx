@@ -15,7 +15,7 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { getMyLeagues, type MyLeagueRow, type MyLeagueContestRow } from '@/lib/fantasy/leagues';
-import { contestFormat } from '@/lib/fantasy/competitions';
+import { contestFormat, divisionSuffix } from '@/lib/fantasy/competitions';
 import { getGame } from '@/lib/fantasy/games';
 
 interface StatusChip {
@@ -171,7 +171,8 @@ export function MyLeaguesList() {
                         {showLeagueName ? r.league.name : r.contest.name}
                       </span>
                       <span className="font-tight text-[11px] text-muted truncate">
-                        {r.contest.competitionDef.shortLabel} · {r.contest.seasonYear}
+                        {r.contest.competitionDef.shortLabel}
+                        {divisionSuffix(r.contest.settings)} · {r.contest.seasonYear}
                         {contestFormat(r.contest.settings) === 'h2h' ? ' · H2H' : ''}
                         {r.league.role === 'commissioner' ? ' · Commish' : ''}
                       </span>

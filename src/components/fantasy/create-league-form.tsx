@@ -2,9 +2,10 @@
 
 // Create-league form — auth-gated, create-only (joining moved to the hub's
 // Join league button, Hunter 2026-10-07). name + game + total teams + draft
-// type → createLeague + createContest (setup in the contest's single INSERT)
-// → revalidate → redirect into the league. Total teams and draft type stay
-// commissioner-editable in League Settings until the draft goes live.
+// type (+ division, for USAU Nationals) → createLeague + createContest (setup
+// in the contest's single INSERT) → revalidate → redirect into the league.
+// Total teams and draft type stay commissioner-editable in League Settings
+// until the draft goes live; the division is fixed at creation.
 // Players per team isn't asked: it's fixed by the game (teamSize).
 //
 // The game is chosen HERE (2026-08-27, Hunter): a league is created FOR a game.
@@ -22,7 +23,14 @@ import { TypeOption } from '@/components/fantasy/settings/draft-settings-card';
 import { createLeague, createContest } from '@/lib/fantasy/leagues';
 import { nextStartForGame, type GameStartMap } from '@/lib/fantasy/game-dates';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
-import { DEFAULT_MAX_TEAMS, MIN_TEAMS, type CompetitionId } from '@/lib/fantasy/competitions';
+import {
+  DEFAULT_MAX_TEAMS,
+  MIN_TEAMS,
+  divisionLabel,
+  supportedDivisions,
+  type CompetitionId,
+  type FantasyDivision,
+} from '@/lib/fantasy/competitions';
 import type { DraftType } from '@/lib/fantasy/draft-room';
 import { GAMES } from '@/lib/fantasy/games';
 
@@ -68,6 +76,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
   );
   const [maxTeams, setMaxTeams] = useState(DEFAULT_MAX_TEAMS);
   const [draftType, setDraftType] = useState<DraftType>('snake');
+  const [division, setDivision] = useState<FantasyDivision>('all');
   // Set once createLeague succeeds, so a retry after a failed contest step
   // reuses that league instead of creating a second one.
   const [leagueId, setLeagueId] = useState<string | null>(null);
@@ -82,6 +91,14 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
       disabled: !isStartable(g.id, starts),
     })),
   ];
+
+  // Only USAU Nationals have divisions; a pick the new game doesn't offer
+  // (Mixed → College) falls back to All.
+  const divisions = gameId === '' ? [] : supportedDivisions(gameId);
+  const handleGameChange = (next: GameChoice) => {
+    setGameId(next);
+    if (next === '' || !supportedDivisions(next).includes(division)) setDivision('all');
+  };
 
   const trimmed = name.trim();
   const canSubmit = trimmed.length >= 1 && trimmed.length <= 60 && gameId !== '' && !saving;
@@ -103,7 +120,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
       }
       const id = leagueId ?? (await createLeague(trimmed));
       setLeagueId(id);
-      const contestId = await createContest(id, gameId, seasonYear, undefined, { maxTeams, draftType });
+      const contestId = await createContest(id, gameId, seasonYear, undefined, { maxTeams, draftType, division });
       await revalidateFantasyLeague(id, contestId).catch(() => null);
       router.push(`/fantasy/l/${contestId}`);
     } catch (err) {
@@ -143,7 +160,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
           </div>
           <PillSelect
             value={gameId}
-            onChange={setGameId}
+            onChange={handleGameChange}
             ariaLabel="Which game is this league for"
             options={options}
           />
@@ -151,6 +168,37 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
             Everyone in this league drafts and scores in this game.
           </p>
         </div>
+
+        {divisions.length > 0 && (
+          <div className="mt-4 lg:mt-5">
+            <span
+              id="division-label"
+              className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
+            >
+              Division
+            </span>
+            <div
+              role="radiogroup"
+              aria-labelledby="division-label"
+              className={[
+                'grid grid-cols-2 gap-2',
+                divisions.length === 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-3',
+              ].join(' ')}
+            >
+              {divisions.map((d) => (
+                <TypeOption
+                  key={d}
+                  label={d === 'all' ? 'All' : divisionLabel(d)}
+                  selected={division === d}
+                  onClick={() => setDivision(d)}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-faint font-tight">
+              Only players in this division are in the draft. This can&apos;t be changed later.
+            </p>
+          </div>
+        )}
 
         <div className="mt-4 lg:mt-5">
           <span

@@ -4,6 +4,7 @@ import { Antonio, Inter, Inter_Tight } from 'next/font/google';
 import './globals.css';
 import { ThemeBootstrap } from '@/components/theme-bootstrap';
 import { AuthProvider } from '@/lib/auth/auth-provider';
+import { DisplayNameGate } from '@/components/auth/display-name-gate';
 import { FavoritesOnboardingModal } from '@/components/favorites/favorites-onboarding-modal';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { NavHistoryTracker } from '@/lib/nav-history';
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           {children}
           <FavoritesOnboardingModal />
+          <DisplayNameGate />
           {/* Global static bottom bar (mobile only — self-gated lg:hidden).
               Mounted ONCE at the root so it's truly app-wide regardless of which
               shell a page uses (AppShell, PlaybookShell, bespoke home, etc.) and

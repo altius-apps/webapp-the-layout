@@ -5,7 +5,9 @@
 // display name; they rename it in Settings. Lives in the league layout so it
 // covers every entry path (create, join link, email invite, mobile-joined) and
 // every tab. Once a team is created the tab remounts so its standings / draft
-// counts refetch with the new team in them.
+// counts refetch with the new team in them. ensureMyContestTeam skips members
+// without a usable display name (the name prompt is up); the effect re-runs
+// when the name changes, so the team takes the name the member picks.
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
@@ -29,19 +31,26 @@ export function EnsureContestTeam({
   // StrictMode re-runs effects; a second insert would hit the unique key.
   const ranFor = useRef<string | null>(null);
 
+  const displayName = user?.profile?.display_name ?? null;
+
   useEffect(() => {
     if (!user) return;
-    const key = `${user.id}:${contestId}`;
+    const key = `${user.id}:${contestId}:${displayName ?? ''}`;
     if (ranFor.current === key) return;
     ranFor.current = key;
+    const showTeam = async () => {
+      await revalidateFantasyLeague(leagueId, contestId).catch(() => null);
+      setVersion((v) => v + 1);
+    };
     ensureMyContestTeam(contestId, leagueId, seasonYear)
-      .then(async (created) => {
-        if (!created) return;
-        await revalidateFantasyLeague(leagueId, contestId).catch(() => null);
-        setVersion((v) => v + 1);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Could not create your team.'));
-  }, [user, contestId, leagueId, seasonYear]);
+      .then((created) => (created ? showTeam() : undefined))
+      .catch((err) => {
+        // A run keyed on the old name can win the insert when the name changes
+        // mid-flight; the team exists either way.
+        if (err instanceof Error && err.message === 'You already have a team in this contest.') return showTeam();
+        setError(err instanceof Error ? err.message : 'Could not create your team.');
+      });
+  }, [user, displayName, contestId, leagueId, seasonYear]);
 
   return (
     <>

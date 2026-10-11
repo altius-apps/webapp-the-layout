@@ -38,6 +38,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { getMyLeagueRole } from '@/lib/fantasy/leagues';
@@ -261,7 +262,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   }, [draft?.id, draft?.draftType]);
 
   // ── Player ratings (the ranked list; [] for weekly contests) ─────────────
-  // Re-read during a live draft: the hourly rebuild can reorder the list, and
+  // Re-read during a live draft: a rebuild (weekly or by hand) can reorder the list, and
   // autodraft always takes the current order. A failed re-read keeps the list.
   const draftLive = draft?.status === 'live';
   useEffect(() => {
@@ -1708,6 +1709,24 @@ function CompletePanel({
     byTeam.set(p.teamId, arr);
   }
 
+  // A minute after the draft ends everyone goes back to the league (Hunter,
+  // 2026-10-11). Every completion path stamps currentStartedAt, so a room
+  // opened after that minute leaves right away.
+  const router = useRouter();
+  const [openedAt] = useState(() => Date.now());
+  const endsAt = (draft.currentStartedAt ? Date.parse(draft.currentStartedAt) : openedAt) + 60_000;
+  const [msLeft, setMsLeft] = useState(() => Math.max(0, endsAt - Date.now()));
+  useEffect(() => {
+    const tick = () => {
+      const ms = endsAt - Date.now();
+      if (ms <= 0) router.replace(basePath);
+      else setMsLeft(ms);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [endsAt, basePath, router]);
+
   return (
     <div className="space-y-6">
       <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 text-center">
@@ -1723,6 +1742,9 @@ function CompletePanel({
         >
           View league
         </Link>
+        <p className="mt-3 font-tight text-[12px] text-faint tabular">
+          Back to the league in {Math.ceil(msLeft / 1000)}s
+        </p>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">

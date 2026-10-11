@@ -16,7 +16,7 @@
 
 import { createClient as createSessionClient } from '@/lib/supabase/client';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import { moderateName } from '@/lib/moderation';
+import { moderateText } from '@/lib/moderation-players';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -111,12 +111,12 @@ export async function getLeagueMessages(leagueId: string, limit = 100): Promise<
 }
 
 /** Post a chat message. Client moderation for the instant error; the DB
- *  trigger (jersey_text_is_clean) is the backstop; 30 per 10 min per league. */
+ *  trigger (ugc_text_is_clean) is the backstop; 30 per 10 min per league. */
 export async function sendLeagueMessage(leagueId: string, body: string): Promise<LeagueMessage> {
   const text = body.trim();
   if (text.length < 1) throw new Error('Write something first.');
   if (text.length > 500) throw new Error('Keep it under 500 characters.');
-  const bad = moderateName(text, 'Message');
+  const bad = await moderateText(text, 'Message');
   if (bad) throw new Error(bad);
   const supabase = sessionClient();
   const {

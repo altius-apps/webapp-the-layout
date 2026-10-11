@@ -60,9 +60,10 @@ interface AuthState {
   /**
    * Re-fetch the signed-in user's profile row. Call after mutating the profile
    * (e.g. setting an avatar) so consumers like the nav account chip reflect the
-   * change immediately without a page reload. No-op when signed out.
+   * change immediately without a page reload. No-op when signed out. Resolves
+   * false when the read failed (the previous profile is kept).
    */
-  refreshProfile: () => Promise<void>;
+  refreshProfile: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -122,11 +123,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Fetch the signed-in user's profile row. Shared by the mount/user-change
   // effect below and the exported refreshProfile() so a profile mutation (e.g.
   // avatar) reflects immediately.
-  const fetchProfile = useCallback(async (): Promise<void> => {
+  const fetchProfile = useCallback(async (): Promise<boolean> => {
     const userId = session?.user.id;
     if (!userId) {
       setProfile(null);
-      return;
+      return true;
     }
     const supabase = await loadClient();
     // NOTE: `email` and `phone` are deliberately NOT selected. The mobile repo's
@@ -143,12 +144,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .eq('id', userId)
       .maybeSingle();
     // Don't blow away a good profile on a transient read failure — that's the
-    // silent-revert behavior this bug presented as.
+    // silent-revert behavior this bug presented as. Only keep it if it's this
+    // user's: on an account switch a failed read must not leave the previous
+    // account's name and role showing.
     if (error) {
       console.error('Failed to load profile:', error.message);
-      return;
+      setProfile((p) => (p?.id === userId ? p : null));
+      return false;
     }
     setProfile(data ?? null);
+    return true;
   }, [session?.user.id, loadClient]);
 
   // Whenever the session user changes, fetch their profile row. We refetch
@@ -173,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
       if (error) {
         console.error('Failed to load profile:', error.message);
+        setProfile((p) => (p?.id === userId ? p : null));
         return;
       }
       setProfile(data ?? null);
@@ -298,7 +304,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ? {
           id: session.user.id,
           email: session.user.email ?? '',
-          name: profile?.display_name || session.user.email?.split('@')[0] || 'Player',
+          // Never the raw email prefix: it hasn't passed the name check.
+          name: profile?.display_name || 'Player',
           initials: computeInitials(profile?.display_name || session.user.email || ''),
           isAdmin: profile?.role === 'admin',
           profile,

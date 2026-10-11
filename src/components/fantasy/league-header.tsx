@@ -1,7 +1,8 @@
 'use client';
 
 // LeagueHeader — chrome row for every screen inside a fantasy league (contest).
-// Back link → league logo → name + "{shortLabel} · {year}" → commissioner
+// Back link → league logo → name + "{shortLabel} · {year}" (a division league
+// reads "{shortLabel} · Men's · {year}") → commissioner
 // invite (InviteMenu: Email invite or Text message) → feed/chat → settings gear
 // (client island: resolves getMyLeagueRole; only the commissioner sees invite,
 // every member sees the gear — Settings holds Leave league).
@@ -17,6 +18,7 @@ import {
   type FantasyLeagueSummary,
   type LeagueRole,
 } from '@/lib/fantasy/leagues';
+import { divisionSuffix } from '@/lib/fantasy/competitions';
 import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { InviteMenu } from '@/components/fantasy/invite-menu';
@@ -78,7 +80,8 @@ export function LeagueHeader({ contest, league }: Props) {
           {title}
         </h1>
         <p className="m-0 font-tight text-[12px] text-muted truncate">
-          {contest.competitionDef.shortLabel} · {contest.seasonYear}
+          {contest.competitionDef.shortLabel}
+          {divisionSuffix(contest.settings)} · {contest.seasonYear}
         </p>
       </div>
 
