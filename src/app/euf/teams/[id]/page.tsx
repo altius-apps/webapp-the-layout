@@ -102,6 +102,7 @@ export default async function EufTeamPage({ params }: Props) {
                       {oppId ? (
                         <Link
                           href={`/euf/teams/${oppId}`}
+                          prefetch={false}
                           className="truncate no-underline hover:underline text-muted"
                         >
                           {oppName}
@@ -119,6 +120,7 @@ export default async function EufTeamPage({ params }: Props) {
                     )}
                     <Link
                       href={`/euf/g/${g.id}`}
+                      prefetch={false}
                       aria-label={`Box score vs ${oppName}`}
                       className="text-[10px] font-bold tracking-[0.1em] uppercase text-muted font-tight flex-shrink-0 no-underline hover:text-accent transition-colors"
                     >
@@ -160,6 +162,7 @@ export default async function EufTeamPage({ params }: Props) {
                             by NAME — same routing the leaders table uses. */}
                         <Link
                           href={`/euf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                          prefetch={false}
                           className="no-underline hover:underline text-ink"
                         >
                           {p.fullName}

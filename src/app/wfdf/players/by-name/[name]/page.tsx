@@ -98,6 +98,7 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
             <li key={`${s.teamId}-${i}`}>
               <Link
                 href={`/wfdf/teams/${s.teamId}`}
+                prefetch={false}
                 className={[
                   'flex items-center gap-3 bg-surface rounded-card px-4 py-3',
                   'shadow-card transition-shadow hover:shadow-lift cursor-pointer no-underline',
@@ -143,6 +144,7 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
               <li key={`${a.teamId}-${i}`}>
                 <Link
                   href={`/euf/clubs/${encodeURIComponent(a.teamName)}?div=${encodeURIComponent(a.division)}&season=${a.year}`}
+                  prefetch={false}
                   className={[
                     'flex items-center gap-3 bg-surface rounded-card px-4 py-3',
                     'shadow-card transition-shadow hover:shadow-lift cursor-pointer no-underline',

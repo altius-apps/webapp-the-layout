@@ -51,6 +51,7 @@ import {
   getTeam as getUsauTeam,
   getEvent as getUsauEvent,
   getPlayerProfile as getUsauPlayerProfile,
+  getUsauTeamDivisions,
   listOfficialUsauRankings,
 } from '@/lib/usau/data';
 import { flightForName } from '@/lib/usau/flights';
@@ -1288,6 +1289,30 @@ function proLeagueCard(
 }
 
 /** USAU: official Top-N rankings for a rank-set (default Club-Men). */
+/** The official ranking set to show: the one most of the user's favorite USAU
+ *  teams play in (ties → the first favorite's), else Club-Men. Masters and
+ *  other levels have no official ranking, so they don't count. */
+async function usauRankDivisionFor(favTeams: FavoriteTeam[]): Promise<UsauRankDivision> {
+  const ids = favTeams.filter((t) => t.league === 'usau').map((t) => t.teamId);
+  const rows = await getUsauTeamDivisions(ids).catch(() => []);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const counts = new Map<UsauRankDivision, number>();
+  for (const id of ids) {
+    const r = byId.get(id);
+    if (!r) continue;
+    const g = r.genderDivision;
+    const level = r.competitionLevel ?? '';
+    let d: UsauRankDivision | null = null;
+    if (level === 'CLUB' && (g === 'Men' || g === 'Women' || g === 'Mixed')) d = `Club-${g}`;
+    else if (level.startsWith('COLLEGE') && (g === 'Men' || g === 'Women')) d = `College-${g}`;
+    if (d) counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  let best: UsauRankDivision = 'Club-Men';
+  let bestN = 0;
+  for (const [d, n] of counts) if (n > bestN) [best, bestN] = [d, n];
+  return best;
+}
+
 async function usauLeagueCard(division: UsauRankDivision): Promise<FeedLeague | null> {
   const res = await listOfficialUsauRankings(division, LEAGUE_TOP_N).catch(() => null);
   if (!res || res.teams.length === 0) return null;
@@ -1627,7 +1652,9 @@ export async function getForYouFeed(
 
     // USAU + WFDF fetch on demand (only when favorited).
     const [usauCard, wfdfCard] = await Promise.all([
-      favLeagues.has('usau') ? usauLeagueCard('Club-Men') : Promise.resolve(null),
+      favLeagues.has('usau')
+        ? usauRankDivisionFor(teams).then((d) => usauLeagueCard(d))
+        : Promise.resolve(null),
       favLeagues.has('wfdf') ? wfdfLeagueCard() : Promise.resolve(null),
     ]);
     if (usauCard) leagueCards.push(usauCard);

@@ -189,6 +189,7 @@ export default async function EufClubPage({ params, searchParams }: Props) {
                           ? `/usau/events/${c.eventSlug}`
                           : `/wfdf/events/${c.eventSlug}`
                       }
+                      prefetch={false}
                       className="no-underline hover:underline text-ink"
                     >
                       {c.eventName}

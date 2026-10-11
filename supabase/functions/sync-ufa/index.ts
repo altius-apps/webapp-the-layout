@@ -129,33 +129,41 @@ const MIME: Record<string, string> = {
  * use Supabase's image transform, which bills per unique origin image).
  * We self-host rather than store the watchufa hotlink because those are full-res
  * multi-MB originals off a third-party CDN — slow, flaky, and they can vanish.
- * Soft-fails to null at every step so a missing/blocked headshot never breaks
- * the sync.
+ * Never throws, so a missing/blocked headshot never breaks the sync. Returns
+ * 'none' only when upstream answered and has no image (remembered, never
+ * re-scraped), and 'failed' for anything transient (network, 5xx, 429, upload
+ * error) so the player is retried on a later run instead of being written off
+ * as imageless forever.
  */
-async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Promise<string | null> {
+type HeadshotResult = { url: string } | 'none' | 'failed';
+
+/** 4xx other than 429 = upstream's answer; 5xx/429 = try again later. */
+const isTransient = (status: number) => status >= 500 || status === 429;
+
+async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Promise<HeadshotResult> {
   // 1. Scrape the profile page for the source image URL.
   let srcUrl: string | null = null;
   try {
     const res = await fetch(`${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`, {
       headers: { 'User-Agent': UA, Accept: 'text/html' },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return isTransient(res.status) ? 'failed' : 'none';
     const m = (await res.text()).match(HEADSHOT_RE);
     srcUrl = m ? m[1] : null;
   } catch {
-    return null;
+    return 'failed';
   }
-  if (!srcUrl) return null;
+  if (!srcUrl) return 'none';
 
   // 2. Download the original.
   let bytes: Uint8Array;
   try {
     const res = await fetch(srcUrl, { headers: { 'User-Agent': UA } });
-    if (!res.ok) return null;
+    if (!res.ok) return isTransient(res.status) ? 'failed' : 'none';
     bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length === 0) return null;
+    if (bytes.length === 0) return 'failed';
   } catch {
-    return null;
+    return 'failed';
   }
 
   // 3. Downscale before storing. Upstream images are ~3.4 MB 2400x3000 camera
@@ -184,8 +192,8 @@ async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Pro
       upsert: true,
       cacheControl: '31536000',
     });
-  if (error) return null;
-  return supabase.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl;
+  if (error) return 'failed';
+  return { url: supabase.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl };
 }
 
 // ── roster-reports fallback for championship-weekend / all-star games ───────
@@ -703,13 +711,15 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
           updated_at: new Date().toISOString(),
         });
         if (headshotFetches < MAX_HEADSHOT_FETCHES && !existingHeadshots.has(rp.playerID)) {
-          const url = await fetchHeadshotUrl(supabase, rp.playerID);
+          const result = await fetchHeadshotUrl(supabase, rp.playerID);
           headshotFetches++;
           existingHeadshots.add(rp.playerID); // don't re-scrape within this run
-          // Stamp the attempt either way — a null result means "no image
-          // upstream", which must be remembered so the next run spends its
-          // budget on someone else instead of re-scraping this player forever.
-          headshotUpdates.push({ id: rp.playerID, url });
+          // Stamp found and 'none' — "no image upstream" must be remembered so
+          // the next run spends its budget on someone else. A 'failed' fetch is
+          // NOT stamped, so a blip doesn't mark the player imageless forever.
+          if (result !== 'failed') {
+            headshotUpdates.push({ id: rp.playerID, url: result === 'none' ? null : result.url });
+          }
         }
       }
 

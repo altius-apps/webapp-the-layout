@@ -22,18 +22,18 @@ export const metadata: Metadata = {
     'Spin for a team and season — UFA, PUL, or WUL. Draft 7 players. Can you go 12-0?',
 };
 
-// Render at request time, not build time. This page reads from Supabase
-// (listTeamYears); static prerender would query the DB during `next build`,
-// which fails the build whenever Supabase isn't reachable at build time (e.g. a
-// fresh deploy before env vars are configured). Dynamic = data is always live.
-export const dynamic = 'force-dynamic';
+// ISR: no per-request inputs, and twelve_oh_team_years is a GROUP BY view over
+// twelve_oh_players that only changes on backfill. Reads degrade to [] so the
+// build-time render survives a DB outage (App Health Rule 5) — an empty league
+// shows its disabled "no data" card until the next revalidate.
+export const revalidate = 600;
 
 export default async function TwelveOhPage() {
   const [ufa, pul, wul, pulTeams] = await Promise.all([
-    listTeamYears('ufa'),
-    listTeamYears('pul'),
-    listTeamYears('wul'),
-    listPulTeams(),
+    listTeamYears('ufa').catch(() => []),
+    listTeamYears('pul').catch(() => []),
+    listTeamYears('wul').catch(() => []),
+    listPulTeams().catch(() => []),
   ]);
 
   const teamDisplay: LeagueTeamDisplayMaps = {

@@ -260,6 +260,7 @@ async function resolveEventWinners(
           .select(select)
           .in('event_id', chunk)
           .eq('status', 'final')
+          .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
           .range(from, from + PAGE - 1);
         if (rounds) q = q.in('round', rounds);
         const { data: page } = await q;
@@ -604,8 +605,8 @@ export async function listEvents(opts?: {
  * Within whichever side we pick, ties (multiple events the same weekend) break
  * by FLIGHT_RANK — the marquee flight (Pro Elite Challenge) headlines over a
  * co-scheduled local tournament. If the preferred side has no event, we fall
- * back to the other side, then to the most-recent event that actually has games
- * so the page is never empty.
+ * back to the other side, then to older in-window events that have games; an
+ * empty window returns null.
  *
  * We consider any tournament-grade level (Club, College D-I/D-III,
  * Masters, Grand Masters) — these are the ones with real bracket data.
@@ -614,8 +615,7 @@ export async function listEvents(opts?: {
  *
  * Returns the slug only; callers fetch the full event via getEvent().
  * `hasGames` is false when the chosen event has NO games ingested yet — UI
- * can render a "happening soon, brackets pending" fallback. (Note: the final
- * fallback only ever returns events that DO have games.)
+ * can render a "happening soon, brackets pending" fallback.
  */
 const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'CLUB',
@@ -663,6 +663,9 @@ async function eventIdsWithTeamLevel(
       .from('usau_event_teams')
       .select('event_id, usau_teams!inner(competition_level)')
       .eq('usau_teams.competition_level', level)
+      // PK (event_id, team_id) → total order so paged ranges don't skip/overlap.
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
       .range(from, from + PAGE - 1);
     if (candidateIds) q = q.in('event_id', candidateIds);
     const { data: page } = await q;
@@ -844,10 +847,6 @@ export async function getCurrentEvent(opts?: {
   /** Restrict to a SET of levels (e.g. both College divisions). Ignored when
    *  competitionLevel is set. Default: all flagship levels. */
   competitionLevels?: CompetitionLevel[];
-  /** false → null when nothing is in the window, skipping the DB-wide fallback.
-   *  A level-scoped hero slide wants that: the fallback would headline last
-   *  season's final months into the off-season. Default true. */
-  fallback?: boolean;
 }): Promise<UsauCurrentPick | null> {
   const db = await supabase();
   const now = new Date();
@@ -856,8 +855,7 @@ export async function getCurrentEvent(opts?: {
   // is all we need — and it keeps the per-event count + division queries below
   // well clear of PostgREST's 1000-row response cap (a ±180d window spans 450+
   // events / 1300+ games, which silently truncates and drops events to "0
-  // games"). The DB-wide fallback at the end of this function still covers any
-  // gap when nothing falls inside the window.
+  // games"). Nothing inside the window → null.
   const windowBack = usauToday(new Date(now.getTime() - 45 * 86400_000));
   const windowForward = usauToday(new Date(now.getTime() + 45 * 86400_000));
 
@@ -1164,47 +1162,12 @@ export async function getCurrentEvent(opts?: {
     ? [...inProgress, ...upcoming, ...justPlayed, ...older]
     : [...inProgress, ...justPlayed, ...upcoming, ...older];
 
-  // hasGames=false → the preview shows "brackets pending"; the DB-wide
-  // fallback below guarantees the page is never truly empty.
+  // hasGames=false → the preview shows "brackets pending".
   const pick = (e: EventRow, hasGames: boolean): UsauCurrentPick => {
     const series = stageById.get(e.id);
     return series ? { series, hasGames } : { slug: e.usau_slug, hasGames };
   };
   if (ordered.length > 0) return pick(ordered[0], hasGames(ordered[0]));
-  if (opts?.fallback === false) return null;
-
-  // Final fallback: most-recent flagship event with games anywhere in DB.
-  // Apply the division filter via the team-participation join when set.
-  let latestQ = db
-    .from('usau_events')
-    .select('id, usau_slug, start_date')
-    .is('series_stage', null)
-    .order('start_date', { ascending: false, nullsFirst: false })
-    .limit(80);
-  latestQ =
-    mastersInclusionIds && mastersInclusionIds.size > 0
-      ? latestQ.or(
-          `competition_level.eq.${opts!.competitionLevel},id.in.(${Array.from(mastersInclusionIds).join(',')})`,
-        )
-      : latestQ.in('competition_level', levelFilter);
-  const { data: latest } = await latestQ;
-  for (const e of latest ?? []) {
-    const { count } = await db
-      .from('usau_games')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_id', e.id);
-    if ((count ?? 0) === 0) continue;
-    if (opts?.genderDivision) {
-      // Skip events that don't have the requested division participating.
-      const { count: matchCount } = await db
-        .from('usau_event_teams')
-        .select('team_id, usau_teams!inner(gender_division)', { count: 'exact', head: true })
-        .eq('event_id', e.id)
-        .eq('usau_teams.gender_division', opts.genderDivision);
-      if (!matchCount || matchCount === 0) continue;
-    }
-    return { slug: e.usau_slug, hasGames: true };
-  }
   return null;
 }
 
@@ -1301,6 +1264,9 @@ export async function getNextUpcomingEvent(opts?: {
         .select('event_id, usau_teams!inner(gender_division)')
         .in('event_id', ids)
         .eq('usau_teams.gender_division', opts.genderDivision)
+        // PK (event_id, team_id) → total order so paged ranges don't skip/overlap.
+        .order('event_id', { ascending: true })
+        .order('team_id', { ascending: true })
         .range(from, from + PAGE - 1);
       const pageRows = page ?? [];
       for (const r of pageRows) withDiv.add((r as { event_id: string }).event_id);
@@ -1487,16 +1453,6 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
     competitionLevel: c.competitionLevel,
     season: c.season,
   }));
-}
-
-/**
- * @deprecated Kept as a thin wrapper for any callers still asking only
- * for a slug. New code should use getCurrentEvent() which also reports
- * whether games are ingested.
- */
-export async function getCurrentClubEventSlug(): Promise<string | null> {
-  const res = await getCurrentEvent();
-  return res && 'slug' in res ? res.slug : null;
 }
 
 /**
@@ -2316,6 +2272,9 @@ async function fieldStrengthByEvent(
       .from('usau_event_teams')
       .select('event_id, usau_teams!team_id(name, gender_division)')
       .in('event_id', eventIds)
+      // PK (event_id, team_id) → total order so paged ranges don't skip/overlap.
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
       .range(from, from + PAGE - 1);
     const rows = (page ?? []) as unknown as Array<{
       event_id: string;
@@ -3432,6 +3391,12 @@ async function buildTeamAliasChecker(
       .from('usau_rosters')
       .select('team_id, player_id, usau_players(display_name)')
       .in('team_id', teamIds)
+      // Unique key (team_id, season, event_id, player_id) so paged ranges
+      // don't skip/overlap.
+      .order('team_id', { ascending: true })
+      .order('season', { ascending: true })
+      .order('event_id', { ascending: true })
+      .order('player_id', { ascending: true })
       .range(from, from + PAGE - 1);
     const rows = (data ?? []) as unknown as Array<{
       team_id: string;
@@ -3515,10 +3480,22 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // Identity rule (v1): merge every row with the same lowercased name,
   // EXCEPT split when two rows share a season but list different teams
   // (one human cannot roster on two club teams in the same season).
-  const { data: namesakes } = await db
-    .from('usau_players')
-    .select('id, display_name')
-    .ilike('display_name', anchor.display_name);
+  // Paged in PK order past PostgREST's 1000-row cap.
+  const namesakes: Array<{ id: string; display_name: string }> = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_players')
+        .select('id, display_name')
+        .ilike('display_name', anchor.display_name)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      const rows = page ?? [];
+      namesakes.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
   const candidateIds = (namesakes ?? [])
     .filter((p) => p.display_name.toLowerCase() === anchor.display_name.toLowerCase())
     .map((p) => p.id);
@@ -3530,24 +3507,57 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // Pull rosters for ALL candidates so we can compute the cluster.
   // gender_division is needed downstream to look up the right (season,
   // division) champion since 3 divisions share the same Nationals event.
-  const { data: candidateRosters } = await db
-    .from('usau_rosters')
-    .select('player_id, team_id, season, event_id, jersey_number, usau_teams(name, gender_division, competition_level)')
-    .in('player_id', candidateIds);
+  // Paged in unique-key order past PostgREST's 1000-row cap. The id list is
+  // not chunked: one name spans at most ~50 player ids (2026-10).
+  interface CandidateRosterRow {
+    player_id: string;
+    team_id: string;
+    season: number;
+    event_id: string | null;
+    jersey_number: string | null;
+    usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null;
+  }
+  const candidateRosters: CandidateRosterRow[] = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_rosters')
+        .select('player_id, team_id, season, event_id, jersey_number, usau_teams(name, gender_division, competition_level)')
+        .in('player_id', candidateIds)
+        .order('team_id', { ascending: true })
+        .order('season', { ascending: true })
+        .order('event_id', { ascending: true })
+        .order('player_id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      const rows = (page ?? []) as unknown as CandidateRosterRow[];
+      candidateRosters.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
 
   // For the identity conflict rule we need to know which candidate TEAMS played
   // a QUALIFYING event (official series or a marquee tournament). Fetch the
   // events for every candidate team_id and mark the teams that qualify.
+  // Paged in PK order; the team list is unchunked (≤~50 per name, 2026-10).
   const candTeamIds = Array.from(new Set((candidateRosters ?? []).map((r) => r.team_id)));
   const qualifyingTeamIds = new Set<string>();
   if (candTeamIds.length > 0) {
-    const { data: candEventRows } = await db
-      .from('usau_event_teams')
-      .select('team_id, usau_events(name)')
-      .in('team_id', candTeamIds);
-    for (const row of candEventRows ?? []) {
-      const ev = (row as { usau_events: { name: string } | null }).usau_events;
-      if (ev && isQualifyingSeriesEvent(ev.name)) qualifyingTeamIds.add((row as { team_id: string }).team_id);
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: candEventRows } = await db
+        .from('usau_event_teams')
+        .select('team_id, usau_events(name)')
+        .in('team_id', candTeamIds)
+        .order('event_id', { ascending: true })
+        .order('team_id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      const rows = candEventRows ?? [];
+      for (const row of rows) {
+        const ev = (row as { usau_events: { name: string } | null }).usau_events;
+        if (ev && isQualifyingSeriesEvent(ev.name)) qualifyingTeamIds.add((row as { team_id: string }).team_id);
+      }
+      if (rows.length < PAGE) break;
     }
   }
 
@@ -3675,13 +3685,22 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     pool: string | null;
     usau_events: { usau_slug: string; name: string; season: number; start_date: string | null } | null;
   }
-  let participationRows: ParticipationRow[] = [];
+  // Paged in PK (event_id, team_id) order past PostgREST's 1000-row cap.
+  const participationRows: ParticipationRow[] = [];
   if (teamIds.length > 0) {
-    const { data } = await db
-      .from('usau_event_teams')
-      .select('team_id, event_id, seed, pool, usau_events(usau_slug, name, season, start_date)')
-      .in('team_id', teamIds);
-    participationRows = (data ?? []) as unknown as ParticipationRow[];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await db
+        .from('usau_event_teams')
+        .select('team_id, event_id, seed, pool, usau_events(usau_slug, name, season, start_date)')
+        .in('team_id', teamIds)
+        .order('event_id', { ascending: true })
+        .order('team_id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      const rows = (data ?? []) as unknown as ParticipationRow[];
+      participationRows.push(...rows);
+      if (rows.length < PAGE) break;
+    }
   }
 
   // Per-EVENT roster gate (mirror of the _build_player_profile prosrc patch,
@@ -3701,6 +3720,12 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
         .select('team_id, event_id')
         .in('team_id', teamIds)
         .not('event_id', 'is', null)
+        // Unique key (team_id, season, event_id, player_id) so paged ranges
+        // don't skip/overlap.
+        .order('team_id', { ascending: true })
+        .order('season', { ascending: true })
+        .order('event_id', { ascending: true })
+        .order('player_id', { ascending: true })
         .range(from, from + PAGE - 1);
       for (const row of page ?? []) {
         eventRosterCoverage.add(`${row.team_id}|${row.event_id}`);
@@ -4954,24 +4979,87 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
   const ids = rows.map((r) => r.id);
   const divisionOf = new Map(rows.map((r) => [r.id, merged ? r.series_division : null]));
 
-  const [partRes, gameRes] = await Promise.all([
-    db
-      .from('usau_event_teams')
-      .select('event_id, team_id, seed, pool, final_placement, usau_teams(name, gender_division, competition_level)')
-      .in('event_id', ids),
-    db
-      .from('usau_games')
-      .select(
-        // usau_games has two FKs to usau_teams (team_a + team_b), so we
-        // hint PostgREST with the !<columnName> syntax to disambiguate.
-        `id, event_id, round, bracket_name, team_a_id, team_b_id,
-         seed_a, seed_b, score_a, score_b, winner_team_id, location, scheduled_at, status,
-         usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
-         bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side,
-         team_a:usau_teams!team_a_id(name),
-         team_b:usau_teams!team_b_id(name)`,
-      )
-      .in('event_id', ids),
+  // Entrants + games, paged in primary-key order past PostgREST's 1000-row cap
+  // (a big event or merged series can exceed it, and the cap truncates
+  // silently). Errors still degrade to an empty page, as the unpaged reads did.
+  type PartRow = {
+    event_id: string;
+    team_id: string;
+    seed: number | null;
+    pool: string | null;
+    final_placement: number | null;
+    usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null;
+  };
+  type GameRow = {
+    id: string;
+    event_id: string;
+    round: string;
+    bracket_name: string | null;
+    team_a_id: string | null;
+    team_b_id: string | null;
+    seed_a: number | null;
+    seed_b: number | null;
+    score_a: number | null;
+    score_b: number | null;
+    winner_team_id: string | null;
+    location: string | null;
+    scheduled_at: string | null;
+    status: string;
+    usau_game_id: string | null;
+    usau_event_game_id: string | null;
+    team_a_placeholder: string | null;
+    team_b_placeholder: string | null;
+    bracket_stage: string | null;
+    bracket_stage_index: number | null;
+    bracket_slot: number | null;
+    next_usau_game_id: string | null;
+    next_slot_side: string | null;
+    team_a: { name: string } | null;
+    team_b: { name: string } | null;
+  };
+  const [partRows, gameRows] = await Promise.all([
+    (async () => {
+      const out: PartRow[] = [];
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data: page } = await db
+          .from('usau_event_teams')
+          .select('event_id, team_id, seed, pool, final_placement, usau_teams(name, gender_division, competition_level)')
+          .in('event_id', ids)
+          .order('event_id', { ascending: true })
+          .order('team_id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        const rows = (page ?? []) as unknown as PartRow[];
+        out.push(...rows);
+        if (rows.length < PAGE) break;
+      }
+      return out;
+    })(),
+    (async () => {
+      const out: GameRow[] = [];
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data: page } = await db
+          .from('usau_games')
+          .select(
+            // usau_games has two FKs to usau_teams (team_a + team_b), so we
+            // hint PostgREST with the !<columnName> syntax to disambiguate.
+            `id, event_id, round, bracket_name, team_a_id, team_b_id,
+             seed_a, seed_b, score_a, score_b, winner_team_id, location, scheduled_at, status,
+             usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
+             bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side,
+             team_a:usau_teams!team_a_id(name),
+             team_b:usau_teams!team_b_id(name)`,
+          )
+          .in('event_id', ids)
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        const rows = (page ?? []) as unknown as GameRow[];
+        out.push(...rows);
+        if (rows.length < PAGE) break;
+      }
+      return out;
+    })(),
   ]);
 
   // Per-player goals/assists — published for flagship events only, so this is
@@ -5015,7 +5103,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       assists: r.assists ?? 0,
     }));
 
-  const teams = (partRes.data ?? []).map((p) => {
+  const teams = partRows.map((p) => {
     const t = (p as { usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null }).usau_teams;
     return {
       teamId: p.team_id,
@@ -5033,7 +5121,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
   // Cleanup passes run PER member: siblings can play at different sites
   // (field + time is not unique across them) and reuse bracket names.
   const rawByEvent = new Map<string, EventGameRow[]>();
-  for (const g of gameRes.data ?? []) {
+  for (const g of gameRows) {
     const ta = (g as { team_a: { name: string } | null }).team_a;
     const tb = (g as { team_b: { name: string } | null }).team_b;
     const list = rawByEvent.get(g.event_id) ?? [];
@@ -5615,4 +5703,21 @@ export async function listRankedTeams(opts?: {
     .map(({ _tier, _natSort, _regSort, ...rest }) => rest);
 
   return { season, teams: ranked };
+}
+
+/** Gender + level for a handful of team ids (the For You card picks its
+ *  official ranking set from the user's favorite USAU teams). */
+export async function getUsauTeamDivisions(
+  ids: string[],
+): Promise<{ id: string; genderDivision: string | null; competitionLevel: string | null }[]> {
+  if (ids.length === 0) return [];
+  const db = await supabase();
+  const { data, error } = await db
+    .from('usau_teams')
+    .select('id, gender_division, competition_level')
+    .in('id', ids.slice(0, 100));
+  if (error) throw error;
+  return ((data ?? []) as { id: string; gender_division: string | null; competition_level: string | null }[]).map(
+    (r) => ({ id: r.id, genderDivision: r.gender_division, competitionLevel: r.competition_level }),
+  );
 }

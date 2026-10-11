@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
+import { NAV_MENU_SECTIONS } from '@/lib/nav-menu-sections';
 
 // Crawler policy (2026-08-12 incident, see vault "Supabase Load Diagnosis
 // 2026-08-11"): allowlist-only. Anything that identifies as a bot or scraping
@@ -19,6 +20,14 @@ const BOT_UA =
 const ALLOWED_BOTS = /googlebot|bingbot|google-inspectiontool/i;
 
 export async function middleware(request: NextRequest) {
+  // The mega-menu's cached data route: unknown sections 404 here so they can't
+  // each become an ISR cache entry. Known ones skip the session refresh.
+  if (request.nextUrl.pathname.startsWith('/api/nav-menu/')) {
+    const section = request.nextUrl.pathname.slice('/api/nav-menu/'.length);
+    return (NAV_MENU_SECTIONS as readonly string[]).includes(section)
+      ? NextResponse.next()
+      : new NextResponse('Not found', { status: 404 });
+  }
   const ua = request.headers.get('user-agent') ?? '';
   if (BOT_UA.test(ua)) {
     if (!ALLOWED_BOTS.test(ua)) {
@@ -49,12 +58,15 @@ export const config = {
   // updateSession() short-circuits before any network call when the request
   // has no auth cookie, so anonymous traffic pays nothing.
   //
-  // Excluded: static assets/images (no session semantics) and /api (the UFA
-  // proxy — latency-sensitive data fetches that never read the session).
+  // Excluded: static assets/images (no session semantics), /api (the UFA
+  // proxy — latency-sensitive data fetches that never read the session), and
+  // /.well-known (Apple's AASA fetcher is "AASA-Bot", which BOT_UA would 403,
+  // silently breaking Universal Links).
   // Each protected route still enforces its own auth (assertAdmin /
   // assertTeamEditor / client gate) — this middleware is cookie refresh, not
   // the access gate.
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|txt|xml|css|js|map)$).*)',
+    '/api/nav-menu/:path*',
+    '/((?!api|\\.well-known|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|txt|xml|css|js|map)$).*)',
   ],
 };

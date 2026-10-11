@@ -30,10 +30,6 @@ interface Props {
   isFinal: boolean;
   away: SpotlightSide;
   home: SpotlightSide;
-  /** UFA renders this as a full-bleed section inside its surface card (default:
-   *  top hairline + section padding). PUL/WUL wrap it in their own card, so they
-   *  pass "bare" to drop the border + outer padding and avoid double chrome. */
-  variant?: 'section' | 'bare';
   /** Whether to render the headshot/monogram avatar circle. Default true (UFA,
    *  which has real headshots for ~89% of players and a monogram fallback for
    *  the rest). PUL/WUL have no headshots at all, so they pass false to skip
@@ -41,42 +37,32 @@ interface Props {
   showAvatar?: boolean;
 }
 
-export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section', showAvatar = true }: Props) {
+export function PlayerSpotlightSection({ isFinal, away, home, showAvatar = true }: Props) {
   const headingId = useId();
   // Nothing to show on either side → don't render an empty shell.
   if (!away.player && !home.player) return null;
 
   const heading = isFinal ? 'Player of the game' : 'Players to watch';
   const eyebrow = isFinal ? 'Top performer' : 'One to watch';
-  const bare = variant === 'bare';
 
   return (
     <section
       aria-labelledby={headingId}
-      className={bare ? '' : 'px-6 py-6 md:px-14 md:py-8 border-t border-hairline'}
+      className="px-6 py-6 md:px-14 md:py-8 border-t border-hairline"
     >
-      {/* Heading grammar matches the host page's own stat-leaders heading:
-          UFA (section) uses the small-caps eyebrow with a bottom hairline;
-          PUL/WUL (bare) use their display-italic section headers. */}
+      {/* Heading grammar matches the host page's own stat-leaders heading: the
+          small-caps eyebrow with a bottom hairline. */}
       <h2
         id={headingId}
-        className={
-          bare
-            ? 'flex items-baseline justify-between gap-4 mb-4'
-            : 'flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-5 pb-2 border-b border-hairline'
-        }
+        className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-5 pb-2 border-b border-hairline"
       >
-        <span className={bare ? 'font-display italic font-bold text-[20px] md:text-[24px] leading-[0.95] tracking-[-0.02em] text-ink' : undefined}>
-          {heading}
-        </span>
-        <span className={bare ? 'text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint' : 'text-faint'}>
-          {eyebrow}
-        </span>
+        <span>{heading}</span>
+        <span className="text-faint">{eyebrow}</span>
       </h2>
 
       <div className="grid grid-cols-2 gap-2 md:gap-3">
-        <SpotlightCard side={away} label="Away" variant={variant} showAvatar={showAvatar} />
-        <SpotlightCard side={home} label="Home" variant={variant} showAvatar={showAvatar} />
+        <SpotlightCard side={away} label="Away" showAvatar={showAvatar} />
+        <SpotlightCard side={home} label="Home" showAvatar={showAvatar} />
       </div>
     </section>
   );
@@ -85,16 +71,13 @@ export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section
 function SpotlightCard({
   side,
   label,
-  variant,
   showAvatar,
 }: {
   side: SpotlightSide;
   label: 'Away' | 'Home';
-  variant: 'section' | 'bare';
   showAvatar: boolean;
 }) {
   const p = side.player;
-  const bare = variant === 'bare';
   // Fall back to the initials monogram if the headshot fails to load (a stale /
   // 404'd URL) instead of showing a broken-image glyph.
   const [imgFailed, setImgFailed] = useState(false);
@@ -169,14 +152,9 @@ function SpotlightCard({
     </div>
   );
 
-  // Tile elevation matches the host page's own player tiles:
-  //  • section (UFA) → recessed inside the page's surface card: bg-bg + rounded-card-sm
-  //    (mirrors FieldLeaderCard).
-  //  • bare (PUL/WUL) → elevated straight on the warm page canvas: bg-surface +
-  //    shadow-card + rounded-card (mirrors those pages' LeaderCard).
-  const base = bare
-    ? 'group block bg-surface rounded-card shadow-card px-2.5 py-3 md:px-4 md:py-3.5'
-    : 'group block bg-bg rounded-card-sm px-2.5 py-3 md:px-4 md:py-3.5';
+  // Recessed inside the page's surface card: bg-bg + rounded-card-sm (mirrors
+  // FieldLeaderCard).
+  const base = 'group block bg-bg rounded-card-sm px-2.5 py-3 md:px-4 md:py-3.5';
 
   // Link to the unified profile when we resolved an id; otherwise a plain card.
   if (p?.profileId) {

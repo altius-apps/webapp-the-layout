@@ -423,6 +423,7 @@ function BoxScore({ title, rows }: { title: string; rows: WfdfGameStatLine[] }) 
                   {s.fullName ? (
                     <Link
                       href={`/wfdf/players/by-name/${encodeURIComponent(s.fullName)}`}
+                      prefetch={false}
                       className="no-underline hover:underline text-ink"
                     >
                       {s.fullName}

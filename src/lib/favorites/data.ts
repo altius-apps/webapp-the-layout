@@ -11,6 +11,7 @@
 
 import { createClient as createSessionClient } from '@/lib/supabase/client';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { usauTeamLogo } from '@/lib/usau/team-logo';
 
 // user_favorite_* tables aren't in database.types.ts — untyped client + casts,
 // same convention as fantasy/pul/wul data layers.
@@ -151,6 +152,30 @@ export async function getMyFavorites(): Promise<MyFavorites> {
     name: r.name,
     logoUrl: r.logo_url ?? null,
   }));
+
+  // USAU crests are keyed by name + gender + level, which the favorite row
+  // doesn't store, so ~1/3 were saved without one. Resolve those at read time.
+  // usau team ids are uuids; anything else would make the .in() below throw.
+  const crestless = teams.filter(
+    (t) => t.league === 'usau' && !t.logoUrl && /^[0-9a-f-]{36}$/i.test(t.teamId),
+  );
+  if (crestless.length > 0) {
+    const { data: divs, error: divErr } = await supabase
+      .from('usau_teams')
+      .select('id, gender_division, competition_level')
+      .in('id', crestless.map((t) => t.teamId));
+    if (divErr) throw divErr;
+    const byId = new Map(
+      ((divs ?? []) as { id: string; gender_division: string | null; competition_level: string | null }[]).map((d) => [
+        d.id,
+        d,
+      ]),
+    );
+    for (const t of crestless) {
+      const d = byId.get(t.teamId);
+      if (d) t.logoUrl = usauTeamLogo(t.name, d.gender_division, d.competition_level);
+    }
+  }
 
   const leagues = ((leaguesRes.data ?? []) as { league: FavoriteLeague }[])
     .map((r) => r.league);

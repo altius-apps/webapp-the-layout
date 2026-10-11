@@ -109,6 +109,14 @@ type UsauCollegeTeamsByDivision = { Men: TopCollegeTeam[]; Women: TopCollegeTeam
 type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
 type WfdfMenuEvent = { slug: string; name: string; year: number };
 
+/** Flyout data from the cached /api/nav-menu route (built server-side at most
+ *  hourly), instead of querying the DB from the browser on every open. */
+async function navMenu<T>(section: string): Promise<T> {
+  const res = await fetch(`/api/nav-menu/${section}`);
+  if (!res.ok) throw new Error(`nav-menu ${section}: ${res.status}`);
+  return (await res.json()) as T;
+}
+
 const UFA_DIVISIONS = ['East', 'Central', 'South', 'West'] as const;
 type UfaDivision = (typeof UFA_DIVISIONS)[number];
 const UFA_BY_DIVISION: Record<UfaDivision, ReturnType<typeof activeTeams>> = (() => {
@@ -1265,13 +1273,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     usauFetchedRef.current = true;
     setUsauLoading(true);
     try {
-      const { listTopUsauTeams } = await import('@/lib/usau/data');
-      const [men, women, mixed] = await Promise.all([
-        listTopUsauTeams({ genderDivision: 'Men', limit: 8 }),
-        listTopUsauTeams({ genderDivision: 'Women', limit: 8 }),
-        listTopUsauTeams({ genderDivision: 'Mixed', limit: 8 }),
-      ]);
-      if (flyoutMountedRef.current) setUsauTeams({ Men: men, Women: women, Mixed: mixed });
+      const teams = await navMenu<UsauTeamsByDivision>('usau');
+      if (flyoutMountedRef.current) setUsauTeams(teams);
     } catch {
       if (flyoutMountedRef.current) setUsauError(true);
     } finally {
@@ -1284,17 +1287,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     usauCollegeFetchedRef.current = true;
     setUsauCollegeLoading(true);
     try {
-      const { listOfficialUsauRankings } = await import('@/lib/usau/data');
-      const [men, women] = await Promise.all([
-        listOfficialUsauRankings('College-Men', 8),
-        listOfficialUsauRankings('College-Women', 8),
-      ]);
-      if (flyoutMountedRef.current) {
-        setUsauCollegeTeams({
-          Men: men.teams.map((t) => ({ id: t.id, name: t.name, rank: t.rank })),
-          Women: women.teams.map((t) => ({ id: t.id, name: t.name, rank: t.rank })),
-        });
-      }
+      const teams = await navMenu<UsauCollegeTeamsByDivision>('usau-college');
+      if (flyoutMountedRef.current) setUsauCollegeTeams(teams);
     } catch {
       if (flyoutMountedRef.current) setUsauCollegeError(true);
     } finally {
@@ -1307,8 +1301,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     pulFetchedRef.current = true;
     setPulLoading(true);
     try {
-      const { listTopPulTeams } = await import('@/lib/pul/data');
-      const teams = await listTopPulTeams();
+      const teams = await navMenu<TopPulTeam[]>('pul');
       if (flyoutMountedRef.current) setPulTeams(teams);
     } catch {
       if (flyoutMountedRef.current) setPulError(true);
@@ -1322,10 +1315,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     wfdfFetchedRef.current = true;
     setWfdfLoading(true);
     try {
-      const { listEvents } = await import('@/lib/wfdf/data');
-      const events = await listEvents();
-      const trimmed = events.slice(0, 8).map((e) => ({ slug: e.slug, name: e.name, year: e.year }));
-      if (flyoutMountedRef.current) setWfdfEvents(trimmed);
+      const events = await navMenu<WfdfMenuEvent[]>('wfdf');
+      if (flyoutMountedRef.current) setWfdfEvents(events);
     } catch {
       if (flyoutMountedRef.current) setWfdfError(true);
     } finally {
@@ -1338,10 +1329,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     eufFetchedRef.current = true;
     setEufLoading(true);
     try {
-      const { listEvents } = await import('@/lib/euf/data');
-      const events = await listEvents();
-      const trimmed = events.slice(0, 8).map((e) => ({ slug: e.slug, name: e.name, year: e.year }));
-      if (flyoutMountedRef.current) setEufEvents(trimmed);
+      const events = await navMenu<WfdfMenuEvent[]>('euf');
+      if (flyoutMountedRef.current) setEufEvents(events);
     } catch {
       if (flyoutMountedRef.current) setEufError(true);
     } finally {

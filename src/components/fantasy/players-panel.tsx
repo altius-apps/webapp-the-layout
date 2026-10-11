@@ -10,8 +10,9 @@
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/PlayersList.tsx).
 //
 // Event contests with player ratings (USAU Nationals) list the ranked players
-// when nothing is typed, until the draft completes and rosters exist, and show
-// rank + Proj on every rated row (src/lib/fantasy/ratings.ts). While a draft
+// when nothing is typed (All / Available), and open on My team once the draft
+// completes and rosters exist, with the pro team kept from the rating. Every
+// rated row shows rank + Proj (src/lib/fantasy/ratings.ts). While a draft
 // runs, its picks mark players as owned, so Available drops them live.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -205,7 +206,8 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
   }, [contest.id, isFaab, canAddDrop]);
 
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  // null until a pill is tapped; `filter` below follows the view until then.
+  const [chosenFilter, setChosenFilter] = useState<Filter | null>(null);
   const [results, setResults] = useState<FantasyPlayerHit[]>([]);
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -248,14 +250,24 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
 
   const hasQuery = query.trim().length >= 2;
   // Scheduling a draft sets settings.draft, but rosters are only seeded when the
-  // draft completes, so a rated pool keeps its ranked list until then.
-  const showMyTeamDefault = !hasQuery && isDrafted && (draftComplete || ratings.length === 0);
+  // draft completes, so a rated pool keeps its ranked list until then. After
+  // that, with nothing typed, the pill opens on My team (or All while searching).
+  const rosterView = isDrafted && (draftComplete || ratings.length === 0);
+  const filter: Filter = chosenFilter ?? (rosterView && !hasQuery ? 'mine' : 'all');
+  // The list follows the pill: My team shows the roster, anything else the ranked
+  // pool (rated contests) or the search prompt.
+  const showMyTeamDefault = !hasQuery && rosterView && filter === 'mine';
   const showRanked = !hasQuery && !showMyTeamDefault && ratings.length > 0;
 
   const baseHits: FantasyPlayerHit[] = hasQuery
     ? results
     : showMyTeamDefault
-      ? myOwnership.map((t) => ({ playerId: t.playerId, fullName: t.playerName, teamId: null, teamName: null }))
+      ? myOwnership.map((t) => ({
+          playerId: t.playerId,
+          fullName: t.playerName,
+          teamId: null,
+          teamName: ratingMap.get(ratingKey(contest.competitionDef.playerLeague, t.playerId))?.teamName ?? null,
+        }))
       : showRanked
         ? ratings.map(ratingToHit)
         : [];
@@ -316,11 +328,11 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
 
       {/* ── Segmented filter ──────────────────────────────────────────── */}
       <div className="flex gap-2">
-        <SegmentButton label="All" active={filter === 'all'} onClick={() => setFilter('all')} />
+        <SegmentButton label="All" active={filter === 'all'} onClick={() => setChosenFilter('all')} />
         {showAvailableFilter && (
-          <SegmentButton label="Available" active={filter === 'available'} onClick={() => setFilter('available')} />
+          <SegmentButton label="Available" active={filter === 'available'} onClick={() => setChosenFilter('available')} />
         )}
-        <SegmentButton label="My team" active={filter === 'mine'} onClick={() => setFilter('mine')} />
+        <SegmentButton label="My team" active={filter === 'mine'} onClick={() => setChosenFilter('mine')} />
       </div>
 
       {/* ── Rows ───────────────────────────────────────────────────────── */}

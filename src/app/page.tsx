@@ -124,7 +124,7 @@ export default async function HomePage() {
   // whole series stage can headline instead ("2026 USAU Sectionals"). No
   // DB-wide fallback: an out-of-season level just drops its slide.
   const usauHeroPick = async (competitionLevels: CompetitionLevel[]) => {
-    const pick = await getCurrentEvent({ competitionLevels, fallback: false });
+    const pick = await getCurrentEvent({ competitionLevels });
     if (!pick) return null;
     if ('series' in pick) return { kind: 'series' as const, series: pick.series };
     const event = await getEvent(pick.slug);

@@ -1,7 +1,7 @@
 'use client';
 
 // LeagueView — the "League" tab body (root tab for points/event contests;
-// 4th tab for h2h weekly contests). Top → bottom: my-team CTA, draft card,
+// 4th tab for h2h weekly contests). Top → bottom: draft card,
 // standings (h2h or points), playoffs mini-section,
 // schedule strip (weekly only), invite code + join CTA. Web port of the
 // mobile app's LeagueView.tsx
@@ -9,7 +9,7 @@
 //
 // Client component: standings/periods/matchups are user-agnostic public
 // reads but change frequently (live scoring) and the page needs a `use
-// client` boundary anyway for MyContestTeamCta/DraftCard/LeagueMembersPanel
+// client` boundary anyway for DraftCard/LeagueMembersPanel
 // — fetching here keeps one loading story instead of mixing server + client
 // data sources for the same section.
 
@@ -30,7 +30,6 @@ import type { LeaderboardRow } from '@/lib/fantasy/data';
 import { contestFormat } from '@/lib/fantasy/competitions';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyWeek } from '@/lib/fantasy/weeks';
-import { MyContestTeamCta } from '@/components/fantasy/my-contest-team-cta';
 import { DraftCard } from '@/components/fantasy/draft-card';
 import { TradesCard } from '@/components/fantasy/trades/trades-card';
 import { WaiversCard } from '@/components/fantasy/waivers-card';
@@ -93,9 +92,6 @@ export function LeagueView({ contest }: { contest: ContestView }) {
 
   return (
     <div className="space-y-8">
-      {/* ── My team CTA ────────────────────────────────────────────────── */}
-      <MyContestTeamCta contest={contest} />
-
       {/* ── Draft card ─────────────────────────── */}
       <DraftCard contest={contest} leagueId={contest.leagueId} />
 

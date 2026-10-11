@@ -157,6 +157,7 @@ export default async function WfdfTeamPage({ params }: Props) {
                     <td className={`px-3 py-2.5 text-[13px] text-left font-medium font-tight ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       <Link
                         href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                        prefetch={false}
                         className="block max-w-[24ch] truncate text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
                         title={p.fullName}
                       >
@@ -224,6 +225,7 @@ export default async function WfdfTeamPage({ params }: Props) {
                       {oppId ? (
                         <Link
                           href={`/wfdf/teams/${oppId}`}
+                          prefetch={false}
                           className="text-[13px] font-tight text-ink truncate hover:text-accent"
                         >
                           {oppName ?? 'TBD'}

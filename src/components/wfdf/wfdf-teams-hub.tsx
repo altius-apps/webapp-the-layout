@@ -161,6 +161,7 @@ function DivisionGroups({ groups, query }: { groups: EventGroup[]; query: string
               <Link
                 key={t.id}
                 href={`/wfdf/teams/${t.id}`}
+                prefetch={false}
                 className={[
                   'flex items-center gap-3 bg-surface rounded-card px-3 py-2.5',
                   'shadow-card no-underline transition-shadow hover:shadow-lift cursor-pointer',

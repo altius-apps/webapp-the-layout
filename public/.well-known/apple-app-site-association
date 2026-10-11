@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["PXQ3LQN54D.com.thelayout.app"],
+        "components": [{ "/": "/fantasy/join/*", "comment": "League invite links open the app when installed" }]
+      }
+    ]
+  }
+}

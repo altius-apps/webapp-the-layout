@@ -7,13 +7,20 @@ import { UFA_BASE } from '@/lib/ufa/client';
 
 export const runtime = 'nodejs';
 
+// Upstream paths the app actually proxies (useLiveGames → games?current=true /
+// games?gameID=). Exact match, so `..` segments can't reach other upstream paths.
+const ALLOWED_PATHS = new Set(['games']);
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { path: string[] } },
 ) {
   const path = params.path.join('/');
+  if (!ALLOWED_PATHS.has(path)) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const search = req.nextUrl.search;
-  const ttl = ttlForRequest(path, req.nextUrl.searchParams);
+  const ttl = ttlForRequest(req.nextUrl.searchParams);
   const upstream = `${UFA_BASE}/${path}${search}`;
 
   const res = await fetch(upstream, {
@@ -42,13 +49,9 @@ export async function GET(
   });
 }
 
-function ttlForRequest(path: string, params: URLSearchParams): number {
-  if (path === 'games') {
-    if (params.get('current') === 'true' || params.get('sidebar') === 'true') return 30;
-    if (params.has('gameID')) return 30;
-    return 300;
-  }
-  if (path === 'standings') return 600;
-  if (path === 'player-stats' || path === 'team-stats') return 3600;
+// Only `games` passes ALLOWED_PATHS.
+function ttlForRequest(params: URLSearchParams): number {
+  if (params.get('current') === 'true' || params.get('sidebar') === 'true') return 30;
+  if (params.has('gameID')) return 30;
   return 300;
 }

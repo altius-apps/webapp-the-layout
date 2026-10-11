@@ -261,23 +261,37 @@ export async function listPendingInvites(teamID: string): Promise<PendingInvite[
   }));
 }
 
-/** Server-side: generates token + inserts invite. Returns the token so the
- *  caller can build a share link. */
-export async function createInvite(
-  teamID: string,
-  email: string,
-  role: TeamRole = 'member',
-): Promise<{ token: string; expiresAt: number }> {
-  const supabase = createClient();
-  const { data, error } = await supabase.rpc('create_team_invite', {
-    p_team_id: teamID,
-    p_email: email,
-    p_role: role,
+export type InviteSendResult = { ok: true } | { ok: false; status: number; error: string | null };
+
+/** Create (or refresh) the invite and email it through the shared invite-email
+ *  Edge Function (also used by fantasy and the mobile app). A refresh rotates
+ *  the token, so an earlier link stops working. On a 4xx, `error` carries the
+ *  function's message; on a 5xx the invite may exist without an email. */
+export async function sendTeamInvite(teamID: string, email: string, role: TeamRole): Promise<InviteSendResult> {
+  const { error } = await createClient().functions.invoke('invite-email', {
+    body: { kind: 'playbook', teamId: teamID, email, role },
   });
+  if (!error) return { ok: true };
+  const res = (error as { context?: Response }).context;
+  const status = res?.status ?? 0;
+  const body = res && status < 500 ? await res.json().catch(() => null) : null;
+  return { ok: false, status, error: body?.error ?? null };
+}
+
+/** The pending invite's token for an address (editors only), so a failed
+ *  email can fall back to a share link. */
+export async function getPendingInviteToken(teamID: string, email: string): Promise<string | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_team_invites')
+    .select('token')
+    .eq('team_id', teamID)
+    .eq('email', email.trim().toLowerCase())
+    .is('accepted_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
   if (error) throw error;
-  const row = (data as { token: string; expires_at: string }[])[0];
-  if (!row) throw new Error('Invite was not created.');
-  return { token: row.token, expiresAt: new Date(row.expires_at).getTime() };
+  return (data?.token as string | undefined) ?? null;
 }
 
 export async function revokeInvite(inviteID: string): Promise<void> {
@@ -1151,12 +1165,12 @@ export async function setPlayVideo(playID: string, raw: string | null): Promise<
 
   if (trimmed !== '') {
     if (trimmed.startsWith(STORAGE_VIDEO_PREFIX)) {
-      // Storage path from our own upload flow. Do NOT trust it blindly: the
-      // playbook-videos bucket allows any authenticated user to read any object,
-      // so without this check a user could attach SOMEONE ELSE's uploaded file
-      // to their own play by passing a foreign storage path. Enforce that the
-      // path's owner-folder ({uid}/…) matches the caller — they can only attach
-      // files they uploaded themselves.
+      // Storage path from our own upload flow. Do NOT trust it blindly: a
+      // foreign path would attach SOMEONE ELSE's uploaded file to this play.
+      // Enforce that the path's owner-folder ({uid}/…) matches the caller —
+      // they can only attach files they uploaded themselves. (The bucket's
+      // SELECT policy also refuses a play that points at another uploader's
+      // file, since 2026-10-11.)
       const objectPath = trimmed.slice(STORAGE_VIDEO_PREFIX.length);
       const ownerFolder = objectPath.split('/')[0];
       const {

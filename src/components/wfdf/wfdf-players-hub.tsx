@@ -73,6 +73,7 @@ export function WfdfPlayersHub({ eventTotals, totalPlayers }: Props) {
               <Link
                 key={e.slug}
                 href={`/wfdf/players/${e.slug}`}
+                prefetch={false}
                 className={[
                   'flex items-center justify-between gap-3 bg-surface rounded-card px-4 py-3',
                   'shadow-card no-underline transition-shadow hover:shadow-lift cursor-pointer',
@@ -110,6 +111,7 @@ export function WfdfPlayersHub({ eventTotals, totalPlayers }: Props) {
             <li key={`${p.teamId}-${p.fullName}-${i}`}>
               <Link
                 href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                prefetch={false}
                 className={[
                   'flex items-center gap-3 px-4 py-2.5 no-underline',
                   'hover:bg-surface-hi transition-colors duration-150',

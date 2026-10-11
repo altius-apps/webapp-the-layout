@@ -69,6 +69,7 @@ import type {
   PulSeasonStint,
   WulSeasonStint,
   WfdfSeasonStint,
+  WfdfChampionTitle,
   EufSeasonStint,
 } from './unified-player';
 
@@ -417,6 +418,29 @@ function shouldAttachUfa(
   // real UFA career (it deleted every Salt Lake Shred player's).
   if (!ufaStates.every((s) => isStateCoveredByRegionMap(s))) return true;
   return ufaStates.some((s) => usauStates.has(s));
+}
+
+/**
+ * WFDF world titles grouped by event series. The series is eventName minus its
+ * trailing year ("WUCC 2026" → "WUCC"); the stint's season is the title year.
+ * Lives here (not unified-player.ts) because that module already imports this
+ * one at runtime — the reverse would add an import cycle. Both builders call it.
+ */
+export function wfdfChampionTitles(years: UnifiedYear[]): WfdfChampionTitle[] {
+  const byEvent = new Map<string, Set<number>>();
+  for (const y of years) {
+    for (const s of y.stints) {
+      if (s.league !== 'wfdf' || !s.isChampion) continue;
+      const event = s.eventName.replace(/\s*\d{4}$/, '').trim() || 'WFDF';
+      const set = byEvent.get(event) ?? new Set<number>();
+      set.add(s.season);
+      byEvent.set(event, set);
+    }
+  }
+  return Array.from(byEvent, ([event, set]) => ({
+    event,
+    years: Array.from(set).sort((a, b) => b - a),
+  })).sort((a, b) => b.years[0] - a.years[0]);
 }
 
 function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
@@ -782,6 +806,7 @@ export async function mapRpcProfile(
       ? (payload.championYearsUfa ?? championYearsUfa).slice().sort((a, b) => b - a)
       : [],
     championYearsUsau: (payload.championYearsUsau ?? []).slice().sort((a, b) => b - a),
+    championTitlesWfdf: wfdfChampionTitles(years),
     mostRecentUsauDivision,
   };
 }

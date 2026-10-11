@@ -132,6 +132,7 @@ function RankedPlayersTable({ rows, query }: { rows: WfdfEventPlayerRow[]; query
                 <td className="py-2 px-2 text-[13px] font-tight text-ink">
                   <Link
                     href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                    prefetch={false}
                     className="block max-w-[20ch] truncate no-underline hover:underline text-ink font-semibold"
                     title={p.fullName}
                   >
@@ -146,6 +147,7 @@ function RankedPlayersTable({ rows, query }: { rows: WfdfEventPlayerRow[]; query
                     <WfdfFlag flagFile={null} countryCode={p.countryCode} size={13} />
                     <Link
                       href={`/wfdf/teams/${p.teamId}`}
+                      prefetch={false}
                       className="min-w-0 truncate no-underline hover:underline text-muted"
                       title={p.teamName}
                     >

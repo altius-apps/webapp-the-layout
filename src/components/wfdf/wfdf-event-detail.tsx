@@ -408,6 +408,7 @@ function DivisionContent({
               <li key={t.id}>
                 <Link
                   href={`/wfdf/teams/${t.id}`}
+                  prefetch={false}
                   className={[
                     'grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_5rem_4rem] items-center px-4 py-3',
                     'no-underline transition-colors duration-150 hover:bg-surface-hi',
@@ -557,6 +558,7 @@ function WfdfPoolCard({
           <li key={t.id}>
             <Link
               href={`/wfdf/teams/${t.id}`}
+              prefetch={false}
               className={[
                 'flex items-center gap-2.5 px-4 py-2.5 no-underline',
                 'transition-colors duration-150 hover:bg-surface-hi',
@@ -779,6 +781,7 @@ function TeamLine({
       {teamId ? (
         <Link
           href={`/wfdf/teams/${teamId}`}
+          prefetch={false}
           className="min-w-0 no-underline hover:text-accent"
           onClick={(e) => e.stopPropagation()}
         >

@@ -57,6 +57,7 @@ export default async function WfdfEventsPage() {
             <Link
               key={e.id}
               href={`/wfdf/events/${e.slug}`}
+              prefetch={false}
               className={[
                 'group flex flex-col gap-3 bg-surface rounded-card shadow-card p-4',
                 'transition-shadow hover:shadow-lift cursor-pointer no-underline',

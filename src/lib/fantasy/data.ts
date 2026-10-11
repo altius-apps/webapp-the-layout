@@ -318,7 +318,7 @@ export async function setAvatarIcon(ref: string | null): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in.');
   if (ref !== null) {
-    const ok = /^(ufa|usau|pul|wul|wfdf):[A-Za-z0-9][A-Za-z0-9/_-]{0,79}$/.test(ref);
+    const ok = /^(ufa|usau|pul|wul|wfdf|euf):[A-Za-z0-9][A-Za-z0-9/_ -]{0,79}$/.test(ref);
     if (!ok) throw new Error('Invalid avatar icon.');
   }
 

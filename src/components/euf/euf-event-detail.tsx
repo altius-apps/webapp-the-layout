@@ -312,6 +312,7 @@ function DivisionContent({
                       <td className="py-2 pr-2">
                         <Link
                           href={`/euf/clubs/${encodeURIComponent(s.teamName)}?div=${encodeURIComponent(s.division)}&season=${season}`}
+                          prefetch={false}
                           className="inline-flex items-center gap-2 no-underline hover:underline text-ink font-tight text-[13px]"
                         >
                           <EufFlag countryName={s.countryName} size={14} />
@@ -473,6 +474,7 @@ function EufPoolCard({ label, games, season }: { label: string; games: EufGameCa
               {t.id ? (
                 <Link
                   href={`/euf/clubs/${encodeURIComponent(t.name)}?div=${encodeURIComponent(t.division)}&season=${season}`}
+                  prefetch={false}
                   className={`${rowClass} hover:bg-ink/[0.03]`}
                 >
                   {inner}
@@ -628,6 +630,7 @@ function GameRow({ game: g, season }: { game: EufGameCard; season: number }) {
               the whole row. */}
           <Link
             href={`/euf/g/${g.id}`}
+            prefetch={false}
             aria-label={`Box score: ${g.homeName} vs ${g.awayName}`}
             className="text-muted no-underline hover:text-accent transition-colors"
           >
@@ -712,6 +715,7 @@ function ChampionBanner({ row, derived, season }: { row: EufStandingRow; derived
       <div className="flex items-center justify-between gap-3 px-4 py-4">
         <Link
           href={`/euf/clubs/${encodeURIComponent(row.teamName)}?div=${encodeURIComponent(row.division)}&season=${season}`}
+          prefetch={false}
           className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
         >
           {Inner}
@@ -772,6 +776,7 @@ function TeamLine({
       {id ? (
         <Link
           href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}&season=${season}`}
+          prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 no-underline hover:underline"
         >
           {inner}

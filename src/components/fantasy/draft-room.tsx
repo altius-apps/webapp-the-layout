@@ -10,14 +10,19 @@
 // Gate (before any room renders — mirrors mobile DraftRoom.tsx):
 //   No draft row → "No draft scheduled yet" (+ commissioner settings link).
 //   scheduled AND >4h out → countdown card, no room.
-//   Otherwise → dispatch by draft.status + draft.draftType.
+//   Otherwise → dispatch by draft.status + draft.draftType, all inside one navy
+//     `.draft-theme` arena (the auction room renders in it too).
 //
 // State machine (draft.status, from the contract):
-//   scheduled → lobby: countdown to scheduledAt (or "starts whenever"), queue
-//     building enabled, readiness warning strip, commissioner Start Now.
-//   live → the room: snake (pick clock, board/players/queue/picks) or
-//     auction (nominate/bid clock, players/budgets/results/queue).
-//   complete → summary: each team's haul (+ auction prices) + link back.
+//   scheduled → lobby: countdown to scheduledAt (or "starts whenever"),
+//     readiness warning strip, commissioner Start Now (replaced by "Drafts open
+//     <date>" until the server's window opens); snake also previews the empty
+//     draft board. No player list or queue until the room goes live.
+//   live → the room: snake (broadcast header with the pick clock, the draft
+//     board, then players/queue/picks) or auction (nominate/bid clock,
+//     players/budgets/results/queue).
+//   complete → summary: snake's full board, each team's haul (+ auction
+//     prices) + link back.
 //
 // Clock resolution: any open client can call resolveDraftClock() /
 // resolveAuction() once a clock is CLOCK_GRACE_MS past 0 (the server's own
@@ -35,7 +40,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
-import { FloatingTabBar, type FloatingTab } from '@/components/floating-tab-bar';
 import { getMyLeagueRole } from '@/lib/fantasy/leagues';
 import {
   getDraft,
@@ -69,8 +73,19 @@ import { getMyContestTeam, type ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
 import { AuctionRoom } from './draft/auction-room';
+import { RoomTabs } from './draft/room-tabs';
 import { CommissionerBar } from './draft/commissioner-bar';
 import { AutoBadge, AutodraftToggle } from './draft/autodraft';
+import {
+  DraftBoard,
+  TeamAvatar,
+  formatClock,
+  pickLabel,
+  snakeCell,
+  toneForRank,
+  type BoardCell,
+  type BoardColumn,
+} from './draft/draft-board';
 import {
   RANKED_PAGE_SIZE,
   RankingsHeader,
@@ -96,10 +111,16 @@ interface Props {
   basePath: string;
 }
 
-type RoomTab = 'players' | 'board' | 'queue' | 'picks';
+type RoomTab = 'players' | 'queue' | 'picks';
+const ROOM_TABS: readonly { id: RoomTab; label: string }[] = [
+  { id: 'players', label: 'Players' },
+  { id: 'queue', label: 'Queue' },
+  { id: 'picks', label: 'Picks' },
+];
 
 const ROOM_OPENS_BEFORE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const RATINGS_REFRESH_MS = 5 * 60 * 1000;
+const FRESH_PICK_MS = 4000; // how long the "pick is in" banner and slam stay up
 
 function formatDraftTime(iso: string): string {
   return new Date(iso).toLocaleString('en-US', {
@@ -111,8 +132,12 @@ function formatDraftTime(iso: string): string {
   });
 }
 
+function formatDraftDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
 export function DraftRoom({ contest, teams, basePath }: Props) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -377,6 +402,9 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     };
   }, [titlePrefix]);
 
+  // Snake only: an auction win isn't "a pick" (the auction room has its own moment).
+  const freshPick = useFreshPick(picks, !loading && draft?.draftType === 'snake');
+
   if (loading) return <RoomSkeleton />;
 
   if (loadError) {
@@ -414,37 +442,94 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     return <RoomOpensSoonCard scheduledAt={draft.scheduledAt} />;
   }
 
+  const teamCount = draft.draftOrder.length;
+  const snake = draft.draftType === 'snake';
+
+  const autodraftToggle = myTeam ? (
+    <AutodraftToggle
+      draftId={draft.id}
+      on={autodraftTeamIds.has(myTeam.id)}
+      onChanged={(next) => {
+        setAutodraftTeamIds((prev) => {
+          const updated = new Set(prev);
+          if (next) updated.add(myTeam.id);
+          else updated.delete(myTeam.id);
+          return updated;
+        });
+        refetch();
+      }}
+    />
+  ) : null;
+  // Live: the clock and board come first; these sit between the board and the
+  // player list so they don't push the clock down on a phone.
+  const liveControls =
+    draft.status === 'live' && (myTeam || isCommissioner) ? (
+      <div className="grid gap-3 lg:grid-cols-2">
+        {autodraftToggle}
+        {isCommissioner && <CommissionerBar draft={draft} pickCount={picks.length} refetch={refetch} />}
+      </div>
+    ) : null;
+  // Snake live room only (the auction has its own "Sign in to bid"). Sits under
+  // the board so a signed-out phone viewer finds it without opening the Queue tab.
+  const signInPrompt =
+    !authLoading && !user ? (
+      <div className="bg-surface rounded-card-lg shadow-card px-4 py-3 lg:px-5 flex items-center justify-between gap-3">
+        <p className="m-0 min-w-0 font-tight text-[13px] text-muted leading-snug">Sign in to draft or build a queue.</p>
+        <button
+          type="button"
+          onClick={() => setAuthOpen(true)}
+          className={[
+            'flex-shrink-0 inline-flex items-center justify-center px-5 min-h-[44px] rounded-full',
+            'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase',
+            'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          Sign in
+        </button>
+      </div>
+    ) : null;
+  const freshTeamName = freshPick ? teamById.get(freshPick.teamId)?.teamName ?? 'Team' : '';
+  const freshLabel = freshPick ? pickLabel(freshPick.overall, teamCount) : '';
+
   return (
-    <div className="space-y-6">
+    // Phones: edge to edge (the frame's px-5 cancelled), like an app screen.
+    <div className="draft-theme bg-bg text-ink -mx-5 px-3 py-4 lg:mx-0 lg:p-5 lg:rounded-card-lg flex flex-col gap-4 lg:gap-6">
+      {/* Always mounted so the text change is announced; the banner is the sighted copy. */}
+      <p className="sr-only" aria-live="polite">
+        {freshPick && `Pick ${freshLabel}: ${freshTeamName} selects ${freshPick.playerName}`}
+      </p>
+      {freshPick && (
+        <PickBanner
+          key={freshPick.overall}
+          label={freshLabel}
+          teamName={freshTeamName}
+          playerName={freshPick.playerName}
+        />
+      )}
+
       {draft.status === 'scheduled' && (
-        <LobbyPanel
-          draft={draft}
-          teams={teams}
-          isCommissioner={isCommissioner}
-          readiness={readiness}
-          onStarted={refetch}
-        />
+        <>
+          <LobbyPanel
+            draft={draft}
+            teams={teams}
+            isCommissioner={isCommissioner}
+            readiness={readiness}
+            onStarted={refetch}
+          />
+          {snake && teamCount > 0 && (
+            <SnakeBoard
+              draft={draft}
+              picks={picks}
+              teamById={teamById}
+              ratings={ratings}
+              myTeamId={myTeam?.id ?? null}
+            />
+          )}
+        </>
       )}
 
-      {draft.status === 'live' && isCommissioner && (
-        <CommissionerBar draft={draft} pickCount={picks.length} refetch={refetch} />
-      )}
-
-      {myTeam && (draft.status === 'scheduled' || draft.status === 'live') && (
-        <AutodraftToggle
-          draftId={draft.id}
-          on={autodraftTeamIds.has(myTeam.id)}
-          onChanged={(next) => {
-            setAutodraftTeamIds((prev) => {
-              const updated = new Set(prev);
-              if (next) updated.add(myTeam.id);
-              else updated.delete(myTeam.id);
-              return updated;
-            });
-            refetch();
-          }}
-        />
-      )}
+      {myTeam && draft.status === 'scheduled' && autodraftToggle}
 
       {draft.status === 'live' && draft.draftType === 'auction' && (
         <AuctionRoom
@@ -462,6 +547,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           bidRemainingMs={bidRemainingMs}
           nominationRemainingMs={nominationRemainingMs}
           autodraftTeamIds={autodraftTeamIds}
+          controls={liveControls}
           onRequireAuth={() => setAuthOpen(true)}
           refetch={refetch}
         />
@@ -472,7 +558,6 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           contest={contest}
           draft={draft}
           picks={picks}
-          teams={teams}
           teamById={teamById}
           draftedByKey={draftedByKey}
           myTeam={myTeam}
@@ -481,6 +566,9 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           queue={queue}
           setQueue={setQueue}
           ratings={ratings}
+          freshOverall={freshPick?.overall ?? null}
+          controls={liveControls}
+          signInPrompt={signInPrompt}
           tab={tab}
           setTab={setTab}
           onRequireAuth={() => setAuthOpen(true)}
@@ -489,7 +577,19 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       )}
 
       {draft.status === 'complete' && (
-        <CompletePanel draft={draft} picks={picks} teams={teams} basePath={basePath} />
+        <>
+          {snake && (
+            <SnakeBoard
+              draft={draft}
+              picks={picks}
+              teamById={teamById}
+              ratings={ratings}
+              myTeamId={myTeam?.id ?? null}
+              freshOverall={freshPick?.overall ?? null}
+            />
+          )}
+          <CompletePanel draft={draft} picks={picks} teams={teams} basePath={basePath} />
+        </>
       )}
 
       <AuthModal
@@ -517,6 +617,57 @@ function RoomOpensSoonCard({ scheduledAt }: { scheduledAt: string }) {
         {countdown}
       </h2>
       <p className="text-muted font-tight text-[13px]">{formatDraftTime(scheduledAt)}</p>
+    </div>
+  );
+}
+
+// ─── Pick-is-in moment ───────────────────────────────────────────────────────
+
+/** The newest pick for FRESH_PICK_MS after it lands while the room is open.
+ *  Silent on first load, on refetches that bring no new pick, and after an
+ *  undo (the top pick drops, so the re-pick counts as new). */
+function useFreshPick(picks: DraftPick[], enabled: boolean): DraftPick | null {
+  const [fresh, setFresh] = useState<DraftPick | null>(null);
+  const topSeen = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      topSeen.current = null;
+      return;
+    }
+    let top: DraftPick | null = null;
+    for (const p of picks) if (!top || p.overall > top.overall) top = p;
+    const prev = topSeen.current;
+    topSeen.current = top ? top.overall : 0;
+    if (prev !== null && top && top.overall > prev) setFresh(top);
+  }, [picks, enabled]);
+
+  // Its own effect: every refetch hands over a new picks array, which would
+  // cancel a timer owned by the effect above and leave the banner stuck.
+  useEffect(() => {
+    if (!fresh) return;
+    const t = setTimeout(() => setFresh(null), FRESH_PICK_MS);
+    return () => clearTimeout(t);
+  }, [fresh]);
+
+  return fresh;
+}
+
+function PickBanner({ label, teamName, playerName }: { label: string; teamName: string; playerName: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      // A toast over the room, so the board doesn't jump on every pick.
+      className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3 rounded-card bg-surface-hi shadow-hero px-4 py-3 motion-safe:animate-fade-up"
+    >
+      <span className="flex-shrink-0 font-tight text-[10.5px] font-extrabold tracking-[0.16em] uppercase text-accent">
+        The pick is in
+      </span>
+      <span className="min-w-0 font-tight text-[14px] lg:text-[15px] text-ink">
+        <span className="font-bold tabular">{label}</span>
+        {' · '}
+        {teamName} selects <span className="font-extrabold">{playerName}</span>
+      </span>
     </div>
   );
 }
@@ -561,6 +712,9 @@ function LobbyPanel({
   };
 
   const orderKnown = draft.draftOrder.length > 0;
+  // The server refuses start_draft until the window opens, so don't offer it.
+  const opensAt =
+    readiness?.earliestAt && new Date(readiness.earliestAt).getTime() > Date.now() ? readiness.earliestAt : null;
 
   return (
     <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 text-center">
@@ -602,25 +756,31 @@ function LobbyPanel({
         </ol>
       )}
 
-      {isCommissioner && (
-        <button
-          type="button"
-          onClick={handleStart}
-          disabled={starting}
-          className={[
-            'inline-flex items-center justify-center gap-2 px-7 py-3 rounded-full min-h-[44px]',
-            'bg-accent text-accent-ink font-tight text-[13px] font-bold tracking-[0.08em] uppercase',
-            'hover:opacity-90 transition-opacity duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-          ].join(' ')}
-        >
-          {starting ? 'Starting…' : 'Start now'}
-        </button>
+      {opensAt ? (
+        <p className="inline-flex items-center px-4 py-2 rounded-full bg-ink/[0.06] text-muted font-tight text-[12px] font-bold tracking-[0.08em] uppercase">
+          Drafts open {formatDraftDate(opensAt)}
+        </p>
+      ) : (
+        isCommissioner && (
+          <button
+            type="button"
+            onClick={handleStart}
+            disabled={starting}
+            className={[
+              'inline-flex items-center justify-center gap-2 px-7 py-3 rounded-full min-h-[44px]',
+              'bg-accent text-accent-ink font-tight text-[13px] font-bold tracking-[0.08em] uppercase',
+              'hover:opacity-90 transition-opacity duration-150 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
+            ].join(' ')}
+          >
+            {starting ? 'Starting…' : 'Start now'}
+          </button>
+        )
       )}
       {error && <p className="mt-3 text-[12px] text-live font-tight" role="alert">{error}</p>}
 
       <p className="mt-6 text-[11px] text-faint font-tight">
-        Queue your favorite players below while you wait — the PLAYERS tab is open now.
+        The player list and your queue open when the draft goes live.
       </p>
     </div>
   );
@@ -653,7 +813,6 @@ function LiveRoom({
   contest,
   draft,
   picks,
-  teams,
   teamById,
   draftedByKey,
   myTeam,
@@ -662,6 +821,9 @@ function LiveRoom({
   queue,
   setQueue,
   ratings,
+  freshOverall,
+  controls,
+  signInPrompt,
   tab,
   setTab,
   onRequireAuth,
@@ -670,7 +832,6 @@ function LiveRoom({
   contest: ContestView;
   draft: Draft;
   picks: DraftPick[];
-  teams: TeamInfo[];
   teamById: Map<string, TeamInfo>;
   draftedByKey: Map<string, string>;
   myTeam: TeamInfo | null;
@@ -679,52 +840,57 @@ function LiveRoom({
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
   ratings: PlayerRating[];
+  freshOverall: number | null;
+  /** Autodraft toggle + commissioner controls, shown under the board. */
+  controls: React.ReactNode;
+  /** Signed-out viewers only: a visible Sign in under the board. */
+  signInPrompt: React.ReactNode;
   tab: RoomTab;
   setTab: (t: RoomTab) => void;
   onRequireAuth: () => void;
   refetch: () => void;
 }) {
+  const teamCount = draft.draftOrder.length;
   const onClockTeamId = teamOnClock(draft);
   const onClockTeam = onClockTeamId ? teamById.get(onClockTeamId) : null;
-  const round = roundOf(draft.currentOverall, draft.draftOrder.length);
+  const round = roundOf(draft.currentOverall, teamCount);
 
   // Display only — DraftRoom's clock timer resolves an expired pick.
   const remainingMs = useClockRemaining(draft.currentStartedAt, draft.pickSeconds);
 
-  const tabs: FloatingTab[] = [
-    { id: 'players', label: 'Players', icon: PlayersIcon },
-    { id: 'board', label: 'Board', icon: BoardIcon },
-    { id: 'queue', label: 'Queue', icon: QueueIcon },
-    { id: 'picks', label: 'Picks', icon: PicksIcon },
-  ];
-
   return (
-    <div>
-      {/* Header strip */}
-      <div
-        className={[
-          'bg-surface rounded-card-lg shadow-card p-4 lg:p-5 mb-6',
-          isMyClock ? 'ring-2 ring-accent' : '',
-        ].join(' ')}
-      >
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1">
-              R{round} &middot; Pick {draft.currentOverall}
-            </div>
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-tight text-[16px] font-bold text-ink truncate">
-                {isMyClock ? "You're on the clock" : `${onClockTeam?.teamName ?? 'Team'} is on the clock`}
-              </span>
-              {onClockTeamId && autodraftTeamIds.has(onClockTeamId) && <AutoBadge />}
-            </div>
-          </div>
-          <ClockDial remainingMs={remainingMs} pickSeconds={draft.pickSeconds} urgent={isMyClock} />
-        </div>
-      </div>
+    <div className="space-y-4 lg:space-y-6">
+      <BroadcastHeader
+        draft={draft}
+        round={round}
+        onClockTeamId={onClockTeamId}
+        onClockTeamName={onClockTeam?.teamName ?? 'Team'}
+        onClockAuto={!!onClockTeamId && autodraftTeamIds.has(onClockTeamId)}
+        isMyClock={isMyClock}
+        myTeamId={myTeam?.id ?? null}
+        remainingMs={remainingMs}
+      />
 
-      {/* Desktop: board left (2/3) + rail right. Mobile: tabs. */}
+      <SnakeBoard
+        draft={draft}
+        picks={picks}
+        teamById={teamById}
+        ratings={ratings}
+        myTeamId={myTeam?.id ?? null}
+        autodraftTeamIds={autodraftTeamIds}
+        clock={{
+          remainingSec: remainingMs === null ? null : Math.max(0, Math.ceil(remainingMs / 1000)),
+          mine: isMyClock,
+        }}
+        freshOverall={freshOverall}
+      />
+
+      {controls}
+      {signInPrompt}
+
+      {/* Mobile: the board above, tabs under it. */}
       <div className="lg:hidden">
+        <RoomTabs tabs={ROOM_TABS} active={tab} onChange={setTab} ariaLabel="Draft room sections" />
         {tab === 'players' && (
           <PlayersPanel
             contest={contest}
@@ -740,7 +906,6 @@ function LiveRoom({
             refetch={refetch}
           />
         )}
-        {tab === 'board' && <BoardPanel draft={draft} picks={picks} teams={teams} autodraftTeamIds={autodraftTeamIds} />}
         {tab === 'queue' && (
           <QueuePanel
             draft={draft}
@@ -751,17 +916,13 @@ function LiveRoom({
             onRequireAuth={onRequireAuth}
           />
         )}
-        {tab === 'picks' && <PicksPanel picks={picks} teamById={teamById} />}
-        <div className="h-4" />
-        <FloatingTabBar tabs={tabs} activeId={tab} onChange={(id) => setTab(id as RoomTab)} ariaLabel="Draft room sections" />
+        {tab === 'picks' && <PicksPanel picks={picks} teamById={teamById} teamCount={teamCount} />}
       </div>
 
+      {/* Desktop: players under the board (2/3), queue + picks rail beside them. */}
       <div className="hidden lg:grid grid-cols-3 gap-6">
-        <div className="col-span-2">
-          <BoardPanel draft={draft} picks={picks} teams={teams} autodraftTeamIds={autodraftTeamIds} />
-        </div>
-        <div>
-          <DesktopRail
+        <div className="col-span-2 min-w-0">
+          <PlayersPanel
             contest={contest}
             draft={draft}
             draftedByKey={draftedByKey}
@@ -771,9 +932,20 @@ function LiveRoom({
             queue={queue}
             setQueue={setQueue}
             ratings={ratings}
-            picks={picks}
             onRequireAuth={onRequireAuth}
             refetch={refetch}
+          />
+        </div>
+        <div className="min-w-0">
+          <DesktopRail
+            draft={draft}
+            teamById={teamById}
+            myTeam={myTeam}
+            queue={queue}
+            setQueue={setQueue}
+            ratings={ratings}
+            picks={picks}
+            onRequireAuth={onRequireAuth}
           />
         </div>
       </div>
@@ -782,52 +954,35 @@ function LiveRoom({
 }
 
 function DesktopRail(props: {
-  contest: ContestView;
   draft: Draft;
-  draftedByKey: Map<string, string>;
   teamById: Map<string, TeamInfo>;
   myTeam: TeamInfo | null;
-  isMyClock: boolean;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
   ratings: PlayerRating[];
   picks: DraftPick[];
   onRequireAuth: () => void;
-  refetch: () => void;
 }) {
-  const [railTab, setRailTab] = useState<'players' | 'queue' | 'picks'>('players');
+  const [railTab, setRailTab] = useState<'queue' | 'picks'>('queue');
   return (
     <div>
-      <div className="flex gap-1 mb-4 bg-ink/[0.04] rounded-full p-1">
-        {(['players', 'queue', 'picks'] as const).map((id) => (
+      <div className="flex gap-1 mb-4 bg-ink/[0.06] rounded-full p-1">
+        {(['queue', 'picks'] as const).map((id) => (
           <button
             key={id}
             type="button"
             onClick={() => setRailTab(id)}
+            aria-pressed={railTab === id}
             className={[
-              'flex-1 px-3 py-2 rounded-full font-tight text-[11px] font-bold tracking-[0.08em] uppercase transition-colors duration-150 cursor-pointer',
-              railTab === id ? 'bg-surface text-ink shadow-soft' : 'text-muted hover:text-ink',
+              'flex-1 px-3 py-2 min-h-[40px] rounded-full font-tight text-[11px] font-bold tracking-[0.08em] uppercase transition-colors duration-150 cursor-pointer',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              railTab === id ? 'bg-surface-hi text-ink shadow-soft' : 'text-muted hover:text-ink',
             ].join(' ')}
           >
             {id}
           </button>
         ))}
       </div>
-      {railTab === 'players' && (
-        <PlayersPanel
-          contest={props.contest}
-          draft={props.draft}
-          draftedByKey={props.draftedByKey}
-          teamById={props.teamById}
-          myTeam={props.myTeam}
-          isMyClock={props.isMyClock}
-          queue={props.queue}
-          setQueue={props.setQueue}
-          ratings={props.ratings}
-          onRequireAuth={props.onRequireAuth}
-          refetch={props.refetch}
-        />
-      )}
       {railTab === 'queue' && (
         <QueuePanel
           draft={props.draft}
@@ -838,7 +993,9 @@ function DesktopRail(props: {
           onRequireAuth={props.onRequireAuth}
         />
       )}
-      {railTab === 'picks' && <PicksPanel picks={props.picks} teamById={props.teamById} />}
+      {railTab === 'picks' && (
+        <PicksPanel picks={props.picks} teamById={props.teamById} teamCount={props.draft.draftOrder.length} />
+      )}
     </div>
   );
 }
@@ -867,26 +1024,115 @@ function useDeadlineRemaining(endsAt: string | null): number | null {
   return new Date(endsAt).getTime() - now;
 }
 
-function ClockDial({
+// ─── Broadcast header ───────────────────────────────────────────────────────
+
+/** Picks from now until the team's next turn (1 = the pick after this one);
+ *  null when it has no turn left. */
+function picksUntilTurn(draft: Draft, teamId: string): number | null {
+  const total = draft.rounds * draft.draftOrder.length;
+  for (let k = draft.currentOverall + 1; k <= total; k++) {
+    if (teamOnClock({ draftOrder: draft.draftOrder, currentOverall: k }) === teamId) {
+      return k - draft.currentOverall;
+    }
+  }
+  return null;
+}
+
+function BroadcastHeader({
+  draft,
+  round,
+  onClockTeamId,
+  onClockTeamName,
+  onClockAuto,
+  isMyClock,
+  myTeamId,
   remainingMs,
-  pickSeconds,
-  urgent,
 }: {
+  draft: Draft;
+  round: number;
+  onClockTeamId: string | null;
+  onClockTeamName: string;
+  onClockAuto: boolean;
+  isMyClock: boolean;
+  myTeamId: string | null;
   remainingMs: number | null;
-  pickSeconds: number;
-  urgent: boolean;
 }) {
-  const sec = remainingMs === null ? pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
+  const sec = remainingMs === null ? draft.pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
+  // ≤10s: live and accent are both coral here, so urgency is pulse + size, not color.
   const low = sec <= 10;
+  // The bar's viewBox is 100 wide, so the rect's width attribute is the percent left.
+  const left =
+    remainingMs === null
+      ? 100
+      : Math.round(Math.max(0, Math.min(100, (remainingMs / (draft.pickSeconds * 1000)) * 100)) * 10) / 10;
+  const until = myTeamId && !isMyClock ? picksUntilTurn(draft, myTeamId) : null;
+
   return (
     <div
       className={[
-        'flex-shrink-0 flex items-center justify-center w-16 h-16 rounded-full font-tight text-[20px] font-bold tabular',
-        low ? 'bg-live/10 text-live' : urgent ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
+        'relative overflow-hidden rounded-card-lg bg-surface shadow-card px-4 pt-3.5 pb-5 lg:px-6 lg:pt-5 lg:pb-6',
+        isMyClock ? 'ring-2 ring-accent' : '',
       ].join(' ')}
-      aria-label={`${sec} seconds remaining`}
     >
-      {sec}
+      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:gap-6">
+        <div className="flex items-baseline justify-between gap-3 lg:flex-col lg:items-start lg:justify-start lg:gap-1">
+          <span className="font-tight text-[10.5px] font-bold tracking-[0.16em] uppercase text-muted">
+            Round {round} &middot; Pick {pickLabel(draft.currentOverall, draft.draftOrder.length)}
+          </span>
+          <span className="font-tight text-[11px] text-muted tabular">#{draft.currentOverall} overall</span>
+        </div>
+
+        <div className="flex flex-col items-center gap-2">
+          {isMyClock ? (
+            <span className="inline-flex items-center h-8 lg:h-9 px-4 rounded-full bg-accent text-accent-ink font-tight text-[11.5px] font-extrabold tracking-[0.16em] uppercase">
+              Your turn
+            </span>
+          ) : (
+            <div className="flex items-center gap-2.5 h-8 lg:h-9 min-w-0 max-w-full">
+              <TeamAvatar id={onClockTeamId ?? ''} name={onClockTeamName} />
+              <span className="min-w-0 truncate font-tight text-[15px] lg:text-[17px] font-bold text-ink">
+                <span className="sr-only">On the clock: </span>
+                {onClockTeamName}
+              </span>
+              {onClockAuto && <AutoBadge />}
+            </div>
+          )}
+          <div
+            role="timer"
+            aria-label={`${sec} seconds remaining`}
+            className={[
+              'origin-center font-tight font-extrabold tabular leading-none tracking-[-0.02em] text-ink',
+              'text-[44px] lg:text-[56px]',
+              'motion-safe:transition-transform motion-safe:duration-300',
+              low ? 'scale-110 motion-safe:animate-cue-pulse' : '',
+            ].join(' ')}
+          >
+            {formatClock(sec)}
+          </div>
+        </div>
+
+        {until !== null && (
+          <div className="flex justify-center lg:justify-self-end">
+            <span
+              className={[
+                'inline-flex items-center h-8 px-3.5 rounded-full font-tight text-[11.5px] font-bold text-ink tabular',
+                until === 1 ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : 'bg-ink/[0.08]',
+              ].join(' ')}
+            >
+              {until === 1 ? "You're up next" : `${until} picks until your turn`}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 100 1"
+        preserveAspectRatio="none"
+        className="absolute inset-x-0 bottom-0 h-1 w-full bg-ink/10"
+      >
+        <rect width={left} height="1" className="fill-accent" />
+      </svg>
     </div>
   );
 }
@@ -984,6 +1230,11 @@ function PlayersPanel({
   };
 
   const handleQueue = (hit: FantasyPlayerHit) => {
+    // Signed out, the star would fill locally and the save would fail silently.
+    if (!myTeam) {
+      onRequireAuth();
+      return;
+    }
     const ref: DraftRef = { playerLeague: league, playerId: hit.playerId, playerName: hit.fullName };
     if (queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague)) return;
     const next = [...queue, ref];
@@ -1160,95 +1411,89 @@ function PlayerListSkeleton() {
   );
 }
 
-// ─── Board panel ────────────────────────────────────────────────────────────
+// ─── Draft board ────────────────────────────────────────────────────────────
 
-function BoardPanel({
+// One mapping from draft state to the shared DraftBoard, used by the live room,
+// the lobby preview and the complete summary. Everything starts as an empty
+// cell labeled with its pick number; picks fill in by snake position, and the
+// pick on the clock (live only) overlays its empty cell.
+function SnakeBoard({
   draft,
   picks,
-  teams,
+  teamById,
+  ratings,
+  myTeamId,
   autodraftTeamIds,
+  clock,
+  freshOverall = null,
 }: {
   draft: Draft;
   picks: DraftPick[];
-  teams: TeamInfo[];
-  autodraftTeamIds: Set<string>;
+  teamById: Map<string, TeamInfo>;
+  ratings: PlayerRating[];
+  myTeamId: string | null;
+  /** Live only: teams on autodraft get a badge. */
+  autodraftTeamIds?: Set<string>;
+  /** Live only: the pick on the clock. Omitted in the lobby and once complete. */
+  clock?: { remainingSec: number | null; mine: boolean };
+  freshOverall?: number | null;
 }) {
   const n = draft.draftOrder.length;
-  if (n === 0) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
-        <p className="text-muted font-tight text-[13px]">Board fills in once the draft order is set.</p>
-      </div>
-    );
-  }
-  const pickByOverall = new Map(picks.map((p) => [p.overall, p]));
-  const orderedTeams = draft.draftOrder.map((id) => teams.find((t) => t.id === id));
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
+
+  const columns = useMemo<BoardColumn[]>(
+    () =>
+      draft.draftOrder.map((id) => ({
+        id,
+        name: teamById.get(id)?.teamName ?? 'Team',
+        auto: autodraftTeamIds?.has(id) ?? false,
+      })),
+    [draft.draftOrder, teamById, autodraftTeamIds],
+  );
+
+  const cells = useMemo(() => {
+    const grid: BoardCell[] = [];
+    for (let overall = 1; overall <= draft.rounds * n; overall++) {
+      const { row, col } = snakeCell(overall, n);
+      grid[row * n + col] = { kind: 'empty', corner: pickLabel(overall, n) };
+    }
+    for (const p of picks) {
+      const { row, col } = snakeCell(p.overall, n);
+      const rating = ratingMap.get(ratingKey(p.playerLeague, p.playerId));
+      grid[row * n + col] = {
+        kind: 'pick',
+        playerName: p.playerName,
+        meta: rating?.teamName ?? null,
+        corner: pickLabel(p.overall, n),
+        tone: toneForRank(rating?.rank),
+        auto: p.auto,
+        fresh: p.overall === freshOverall,
+      };
+    }
+    return grid;
+  }, [draft.rounds, n, picks, ratingMap, freshOverall]);
+
+  const focus = clock ? snakeCell(draft.currentOverall, n) : null;
+  const cellAt = (row: number, col: number): BoardCell => {
+    const cell = cells[row * n + col];
+    // Only over an empty cell: a refetch can land the pick before the clock moves on.
+    if (clock && focus && row === focus.row && col === focus.col && cell.kind === 'empty') {
+      return { kind: 'clock', corner: cell.corner, remainingSec: clock.remainingSec, mine: clock.mine };
+    }
+    return cell;
+  };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse min-w-[640px]">
-          <thead>
-            <tr>
-              <th className="sticky left-0 bg-surface px-3 py-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight text-left border-b border-hairline">
-                Rd
-              </th>
-              {orderedTeams.map((t, i) => (
-                <th
-                  key={t?.id ?? i}
-                  className="px-3 py-2.5 text-[10px] font-bold tracking-[0.1em] uppercase text-faint font-tight text-left border-b border-hairline whitespace-nowrap"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    {t?.teamName ?? 'Team'}
-                    {t && draft.status === 'live' && autodraftTeamIds.has(t.id) && <AutoBadge />}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: draft.rounds }, (_, r) => r + 1).map((round) => {
-              const snakeReversed = (round - 1) % 2 === 1;
-              return (
-                <tr key={round}>
-                  <td className="sticky left-0 bg-surface px-3 py-2 text-[11px] font-bold text-faint tabular border-b border-hairline">
-                    {round}
-                  </td>
-                  {orderedTeams.map((t, colIdx) => {
-                    const posInRound = snakeReversed ? n - 1 - colIdx : colIdx;
-                    const overall = (round - 1) * n + posInRound + 1;
-                    const pick = pickByOverall.get(overall);
-                    const isCurrent = overall === draft.currentOverall && draft.status === 'live';
-                    return (
-                      <td
-                        key={t?.id ?? colIdx}
-                        className={[
-                          'px-3 py-2 border-b border-hairline align-top',
-                          isCurrent ? 'bg-accent/10' : '',
-                        ].join(' ')}
-                      >
-                        {pick ? (
-                          <div className="min-w-0">
-                            <div className="font-tight text-[12px] font-semibold text-ink truncate">
-                              {pick.playerName}
-                              {pick.auto && <span className="text-faint font-normal"> (auto)</span>}
-                            </div>
-                          </div>
-                        ) : isCurrent ? (
-                          <span className="font-tight text-[11px] font-bold text-accent">On clock</span>
-                        ) : (
-                          <span className="text-faint">—</span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DraftBoard
+      columns={columns}
+      rows={draft.rounds}
+      cellAt={cellAt}
+      arrows
+      myColumnId={myTeamId}
+      focus={focus}
+      legend={picks.some((p) => ratingMap.has(ratingKey(p.playerLeague, p.playerId)))}
+      ariaLabel="Draft board"
+    />
   );
 }
 
@@ -1295,7 +1540,12 @@ function QueuePanel({
         <button
           type="button"
           onClick={onRequireAuth}
-          className="text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity cursor-pointer"
+          className={[
+            'inline-flex items-center justify-center px-5 min-h-[44px] rounded-full',
+            'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase',
+            'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
         >
           Sign in
         </button>
@@ -1393,7 +1643,15 @@ function XIcon() {
 
 // ─── Picks panel (reverse-chron ticker) ────────────────────────────────────
 
-function PicksPanel({ picks, teamById }: { picks: DraftPick[]; teamById: Map<string, TeamInfo> }) {
+function PicksPanel({
+  picks,
+  teamById,
+  teamCount,
+}: {
+  picks: DraftPick[];
+  teamById: Map<string, TeamInfo>;
+  teamCount: number;
+}) {
   if (picks.length === 0) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
@@ -1410,7 +1668,9 @@ function PicksPanel({ picks, teamById }: { picks: DraftPick[]; teamById: Map<str
             key={p.overall}
             className={['flex items-center gap-3 px-4 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
           >
-            <span className="font-tight text-[11px] font-bold text-faint tabular w-9 flex-shrink-0">#{p.overall}</span>
+            <span className="font-tight text-[11px] font-bold text-muted tabular w-10 flex-shrink-0">
+              {pickLabel(p.overall, teamCount)}
+            </span>
             <div className="min-w-0 flex-1">
               <div className="font-tight text-[13.5px] font-semibold text-ink truncate">
                 {p.playerName}
@@ -1507,33 +1767,3 @@ function RoomSkeleton() {
   );
 }
 
-function PlayersIcon({ size }: { active: boolean; size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-function BoardIcon({ size }: { active: boolean; size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M3.5 9.5h17M9.5 9.5v10" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
-  );
-}
-function QueueIcon({ size }: { active: boolean; size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 7h16M4 12h10M4 17h13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-function PicksIcon({ size }: { active: boolean; size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 12l5 5L20 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}

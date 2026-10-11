@@ -207,6 +207,7 @@ function BoxScore({ title, rows }: { title: string; rows: EufGameStatLine[] }) {
                   )}
                   <Link
                     href={`/euf/players/by-name/${encodeURIComponent(s.fullName)}`}
+                    prefetch={false}
                     className="no-underline hover:underline text-ink"
                   >
                     {s.fullName}

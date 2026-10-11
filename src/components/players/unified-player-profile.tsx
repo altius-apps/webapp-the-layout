@@ -25,7 +25,6 @@ import { PageShell } from '@/components/page-shell';
 import { FromAwareCrumbs } from '@/components/players/from-aware-crumbs';
 import { TeamLogo } from '@/components/team-logo';
 import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-cols';
-import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 import { EufFlag } from '@/components/euf/euf-flag';
 import { normalizeName } from '@/lib/name-match';
@@ -90,6 +89,9 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
       {profile.championYearsUfa.length > 0 && (
         <ChampionBanner years={profile.championYearsUfa} label="UFA Champion" />
       )}
+      {profile.championTitlesWfdf.map((t) => (
+        <ChampionBanner key={t.event} years={t.years} label={`${t.event} Champion`} />
+      ))}
 
       {/* Career totals — UFA only. USAU gets its own block below (stats mean
           something different there: event totals, not per-game box scores —
@@ -791,8 +793,8 @@ function WulStintRow({ stint }: { stint: WulSeasonStint }) {
 
 // ── WFDF stint ──────────────────────────────────────────────────────────
 // A single Worlds appearance — non-expandable (no game log upstream; just
-// tournament goals/assists). Links to the team's WFDF page. Champions get an
-// accent gold marker.
+// tournament goals/assists). Links to the team's WFDF page. Champions get the
+// shared TrophyBadge, like the UFA/USAU/EUCS rows.
 function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
   return (
     <div className="px-4 py-3 flex items-center gap-3">
@@ -804,19 +806,16 @@ function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
         <span className="flex flex-col min-w-0">
           <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
             {stint.teamName}
-            {stint.isChampion && (
-              <span className="ml-1.5 text-[9px] font-bold tracking-[0.12em] uppercase text-[#B8891E]">
-                · Champion
-              </span>
-            )}
           </span>
           <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
             WFDF · {stint.eventName}
             {stint.divisionName ? ` · ${stint.divisionName}` : ''}
             {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
+            {stint.isChampion && ' · Champion'}
           </span>
         </span>
       </Link>
+      {stint.isChampion && <TrophyBadge title={`${stint.eventName} Champion`} />}
       <YearSummaryCells
         cells={[
           { label: 'G', value: stint.stats.goals ?? '—' },
@@ -1292,6 +1291,40 @@ function CareerStat({ label, value }: { label: string; value: string | number })
       </div>
       <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-muted font-tight text-center">
         {label}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Big championship banner at the top of the profile. Lists all the years
+ * this player won the title — single-source-of-truth for the achievement,
+ * the per-stint trophy icon is just a quick scan cue further down.
+ */
+function ChampionBanner({ years, label }: { years: number[]; label: string }) {
+  const sorted = [...years].sort((a, b) => b - a);
+  return (
+    <div
+      role="note"
+      className={[
+        'flex items-center gap-3 mb-6 px-4 py-3 rounded-card',
+        'bg-accent/10 text-ink',
+      ].join(' ')}
+    >
+      <span className="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-accent text-accent-ink">
+        <svg width="18" height="18" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <path d="M6 3h10v5a5 5 0 0 1-10 0V3Z" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M6 5H3v2a2 2 0 0 0 2 2M16 5h3v2a2 2 0 0 1-2 2" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M11 13v3M8 19h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </span>
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          {label}
+        </span>
+        <span className="text-[14px] font-bold font-tight text-ink truncate">
+          {sorted.length === 1 ? `${sorted[0]} title` : `${sorted.length}× champion · ${sorted.join(', ')}`}
+        </span>
       </div>
     </div>
   );

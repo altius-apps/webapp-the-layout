@@ -457,10 +457,13 @@ export async function getLeagueCode(leagueId: string): Promise<string> {
 }
 
 /** The invite message for a text message or email body. The link is the acceptance
- *  (/fantasy/join/[code] auto-joins); the code sits alone on the last line. Browser only. */
+ *  (/fantasy/join/[code] auto-joins; opens the iOS app when installed). Messages
+ *  never linkifies a bare code and long-press copies the whole bubble, so the
+ *  fallback is pasting the whole text — joinLeagueByCode pulls the code from it.
+ *  Browser only. */
 export function leagueInviteText(code: string): string {
   const url = `${window.location.origin}/fantasy/join/${code}`;
-  return `Join my fantasy league on The Layout! Tap to join:\n${url}\n\nOr paste this code in Fantasy → Join:\n${code}`;
+  return `Join my fantasy league on The Layout! Tap to join:\n${url}\n\nOr copy this whole message and paste it in Fantasy → Join.`;
 }
 
 /** Join a league by its shareable code. Idempotent; returns the league id.
@@ -477,20 +480,6 @@ export async function joinLeagueByCode(code: string): Promise<string> {
   const { data, error } = await sessionClient().rpc('fantasy_join_league', { p_code: c });
   if (error) throw error;
   return data as string;
-}
-
-/** Create (or refresh) an email invite. Commissioner-only. */
-export async function createLeagueInvite(
-  leagueId: string,
-  email: string,
-): Promise<{ token: string; expiresAt: string }> {
-  const { data, error } = await sessionClient().rpc('fantasy_create_league_invite', {
-    p_league: leagueId,
-    p_email: email.trim().toLowerCase(),
-  });
-  if (error) throw error;
-  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
-  return { token: row.token as string, expiresAt: row.expires_at as string };
 }
 
 /** What an invite link is for — safe to show pre-auth (league name + email). */
@@ -820,6 +809,41 @@ export async function createContestTeam(
     throw error;
   }
   return data.id as string;
+}
+
+/** Give the signed-in member a team in this contest if they have none, named
+ *  after their display name (renamed later in Settings). Non-members and
+ *  signed-out viewers are a no-op. Returns true when it created the team. */
+export async function ensureMyContestTeam(contestId: string, leagueId: string, seasonYear: number): Promise<boolean> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+  const [role, mine] = await Promise.all([getMyLeagueRole(leagueId), getMyContestTeam(contestId)]);
+  if (!role || mine) return false;
+  // Read from the DB, not useAuth: right after signup the auth profile may
+  // still be loading, and its fallback is the email prefix.
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('display_name, username')
+    .eq('id', user.id)
+    .single();
+  if (error) throw error;
+  const name = ((profile.display_name as string | null)?.trim() || (profile.username as string | null) || 'My Team').slice(0, 40);
+  await createContestTeam(contestId, name, seasonYear);
+  return true;
+}
+
+/** Rename the signed-in user's own team (RLS: owner-only; team_name is the
+ *  only updatable column). */
+export async function renameContestTeam(teamId: string, teamName: string): Promise<void> {
+  const name = teamName.trim();
+  if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
+  const bad = moderateName(name, 'Team name');
+  if (bad) throw new Error(bad);
+  const { error } = await sessionClient().from('fantasy_teams').update({ team_name: name }).eq('id', teamId);
+  if (error) throw error;
 }
 
 // ─── League limits, logo, format (commissioner-only RPCs) ────────────────────

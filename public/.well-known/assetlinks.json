@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.thelayout.app",
+      "sha256_cert_fingerprints": [
+        "2E:07:8A:C6:66:4B:EC:F6:C1:DB:56:8B:B2:F8:D3:3D:63:CC:0D:A6:C1:7E:13:CD:B5:B6:27:95:97:DE:D1:79"
+      ]
+    }
+  }
+]

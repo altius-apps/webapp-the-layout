@@ -115,6 +115,7 @@ function ClubGrid({ clubs }: { clubs: EufClubCard[] }) {
         <Link
           key={`${c.key}-${c.division}`}
           href={`/euf/clubs/${encodeURIComponent(c.name)}?div=${encodeURIComponent(c.division)}`}
+          prefetch={false}
           className={[
             'rounded-card bg-surface shadow-card p-4 no-underline flex flex-col gap-1.5',
             'transition-shadow hover:shadow-lift cursor-pointer',

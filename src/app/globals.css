@@ -69,10 +69,14 @@
    wrapper recolors the chrome in one place. Card FACES are intentionally left
    alone — they're physical cards (cream/colored), exactly as the gauntlet
    already shows them. Accent stays coral (the gauntlet's Play button is coral).
-   Applied regardless of the app-level field/broadcast theme. */
+   Applied regardless of the app-level field/broadcast theme. `.draft-theme`
+   reuses the same navy for the fantasy draft room (Sleeper-style arena). */
 .utcg-theme,
+.draft-theme,
 :root[data-theme='field'] .utcg-theme,
-:root[data-theme='broadcast'] .utcg-theme {
+:root[data-theme='field'] .draft-theme,
+:root[data-theme='broadcast'] .utcg-theme,
+:root[data-theme='broadcast'] .draft-theme {
   --bg: 14 22 34;             /* #0E1622 — gauntlet navy */
   --surface: 26 37 54;        /* #1A2536 — lifted panel (opaque ≈ white/5 on navy) */
   --surface-hi: 34 49 74;     /* #22314A */

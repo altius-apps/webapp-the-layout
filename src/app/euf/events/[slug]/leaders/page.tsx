@@ -12,6 +12,12 @@ import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered.
+export function generateStaticParams(): { slug: string }[] {
+  return [];
+}
+
 interface Props {
   params: { slug: string };
 }
@@ -61,6 +67,7 @@ export default async function EufLeadersPage({ params }: Props) {
                   <td className="py-2 pr-2 text-[13px] font-tight text-ink whitespace-nowrap">
                     <Link
                       href={`/euf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                      prefetch={false}
                       className="no-underline hover:underline text-ink"
                     >
                       {p.fullName}
@@ -72,6 +79,7 @@ export default async function EufLeadersPage({ params }: Props) {
                       {p.teamName ? (
                         <Link
                           href={`/euf/clubs/${encodeURIComponent(p.teamName)}?div=${encodeURIComponent(p.division)}&season=${ev.year}`}
+                          prefetch={false}
                           className="truncate no-underline hover:underline text-muted"
                         >
                           {p.teamName}

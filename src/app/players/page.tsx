@@ -12,6 +12,7 @@ import {
   getAllPlayerStats,
   currentSeasonYear,
   getUfaChampionsByYear,
+  UFA_FIRST_SEASON,
 } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
@@ -96,6 +97,9 @@ function ufaImpact(p: UfaPlayerStat): number {
 
 export const revalidate = 600;
 
+// First WUL season in wul_players (checked 2026-10-11) — floor for the ?season= clamp.
+const WUL_FIRST_SEASON = 2022;
+
 export const metadata: Metadata = {
   title: 'Players · The Layout',
 };
@@ -168,8 +172,8 @@ export default async function PlayersPage({ searchParams }: Props) {
     const playerSeasons = await listPulSeasons().catch((): number[] => []);
     const currentSeason = playerSeasons[0] ?? (await getPulCurrentSeason());
     const seasons = playerSeasons.length > 0 ? playerSeasons : [currentSeason];
-    const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
-    const season = isNaN(rawSeason) ? currentSeason : rawSeason;
+    const requestedSeason = parseInt(searchParams.season ?? '', 10);
+    const season = seasons.includes(requestedSeason) ? requestedSeason : currentSeason;
 
     const [players, teams] = await Promise.all([
       listPulPlayersCached({ season, sortBy, limit: 500 }).catch((): PulPlayer[] => []),
@@ -325,8 +329,11 @@ export default async function PlayersPage({ searchParams }: Props) {
     // the same scrape), not the newest with any game — next season's schedule
     // is in wul_games months before its first stat line.
     const currentSeason = await getWulResultsSeason();
-    const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
-    const season = isNaN(rawSeason) ? currentSeason : rawSeason;
+    const requestedSeason = parseInt(searchParams.season ?? '', 10);
+    const season =
+      requestedSeason >= WUL_FIRST_SEASON && requestedSeason <= currentSeasonYear()
+        ? requestedSeason
+        : currentSeason;
 
     const [players, teams] = await Promise.all([
       listWulPlayersCached({ season, sortBy, limit: 500 }).catch((): WulPlayer[] => []),
@@ -508,7 +515,11 @@ export default async function PlayersPage({ searchParams }: Props) {
 
   // UFA: pull leaders for the selected year. Sort via API (server-side).
   const currentYear = currentSeasonYear();
-  const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
+  // Clamp to seasons that exist — an unbounded ?year= is an upstream fetch per
+  // garbage URL.
+  const requestedYear = parseInt(searchParams.year ?? '', 10);
+  const year =
+    requestedYear >= UFA_FIRST_SEASON && requestedYear <= currentYear ? requestedYear : currentYear;
 
   // Validate sort/dir against the allowlist — never forward arbitrary user input.
   // Default is 'impact' (our derived Goals+Assists+Blocks metric). 'impact' is

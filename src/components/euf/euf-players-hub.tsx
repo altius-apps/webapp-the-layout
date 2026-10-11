@@ -88,6 +88,7 @@ export function EufPlayersHub({ players }: Props) {
                   <td className="py-2 pr-2 text-[13px] font-tight text-ink">
                     <Link
                       href={`/euf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                      prefetch={false}
                       className="no-underline hover:underline text-ink"
                     >
                       {p.fullName}

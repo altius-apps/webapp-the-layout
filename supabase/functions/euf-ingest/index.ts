@@ -1,8 +1,8 @@
 // euf-ingest — ingest one EUCS/EUF event from the Ultiorganizer schedule site.
 //
-// Operator-driven (no cron — matches the backfill rule in the vault). POST a
-// season id; the function scrapes and upserts the whole event: teams, rosters,
-// games, and per-game box scores.
+// Cron-driven since 2026-08-04 (jobs 14 refresh / 16 discover) and runnable by
+// hand: POST a season id; the function scrapes and upserts the whole event:
+// teams, rosters, games, final placements, and per-game box scores.
 //
 // Request body: { "season": "e2cf25", "name": "2025 EUCF Wroclaw", "year": 2025,
 //                 "kind": "eucf", "location": "Wrocław, Poland",
@@ -320,6 +320,12 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
     if (error) throw new Error(`forfeit games insert: ${error.message}`);
   }
 
+  // Final placements from the bracket games just stored. Scoped to this event
+  // and a no-op until its brackets have results; before 2026-10-11 nothing
+  // called it after the hourly refresh, so finished events sat unplaced.
+  const { data: placed, error: placeErr } = await supabase.rpc('derive_euf_placements', { p_event_id: eventId });
+  if (placeErr) throw new Error(`derive placements: ${placeErr.message}`);
+
   // ── 7. Per-game box scores ────────────────────────────────────────────────
   let statLines = 0;
   let gamesWithStats = 0;
@@ -408,6 +414,7 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
     rosterPlayers: rosterRows.length,
     games: gameRows.length,
     unresolvedGameTeams: unresolved,
+    placementsUpdated: placed as number,
     gamesWithStats,
     statLines,
   };

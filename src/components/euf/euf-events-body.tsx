@@ -111,6 +111,7 @@ function EventCard({ event: e }: { event: EufEventCard }) {
   return (
     <Link
       href={`/euf/events/${e.slug}`}
+      prefetch={false}
       className={[
         'group flex flex-col gap-3 bg-surface rounded-card shadow-card p-4',
         'transition-shadow hover:shadow-lift cursor-pointer no-underline',

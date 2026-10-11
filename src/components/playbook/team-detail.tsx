@@ -5,9 +5,9 @@
 // this page is:
 //   MEMBERS — every login on the team, owner first, then coaches, members.
 //   PENDING INVITES (owner / coach) — email / role / expiry, Resend + Revoke.
-//   SEND INVITE (owner / coach) — email + role → create_team_invite RPC → the
-//     invite is emailed via Resend; on email failure the share link is shown
-//     (and copied) so the invite stays usable.
+//   SEND INVITE (owner / coach) — email + role → the shared invite-email Edge
+//     Function creates the invite and emails it; if the email fails, the share
+//     link is shown (and copied) so the invite stays usable.
 //   OWNER — Rename, Delete (confirm → back to /playbook/teams).
 //   NON-OWNER — Leave (confirm → back).
 
@@ -18,21 +18,21 @@ import { PlaybookShell } from './playbook-shell';
 import { TeamBadge } from './manage-teams';
 import { AlertDialog, ConfirmDialog, PromptDialog } from '@/components/confirm-dialog';
 import {
-  createInvite,
   deleteTeam,
+  getPendingInviteToken,
   leaveTeam,
   listMyTeams,
   listPendingInvites,
   listTeamMembers,
   renameTeam,
   revokeInvite,
+  sendTeamInvite,
   type PendingInvite,
   type Team,
   type TeamMember,
   type TeamRole,
 } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
-import { sendInviteEmail, resendInviteEmail } from '@/app/playbook/teams/actions';
 
 const ROLE_ORDER: Record<TeamRole, number> = { owner: 0, coach: 1, member: 2 };
 
@@ -90,16 +90,17 @@ export function TeamDetail({ teamID }: { teamID: string }) {
     async (email: string, role: 'coach' | 'member') => {
       try {
         setError(null);
-        const { token } = await createInvite(teamID, email, role);
-        // Attempt to send via Resend. If it fails, fall back to copy-link so
-        // the invite (already created in the DB) is still usable.
-        try {
-          await sendInviteEmail({ teamId: teamID, email, role, token });
+        const res = await sendTeamInvite(teamID, email, role);
+        if (res.ok) {
           setNotice({ title: 'Invite sent', body: `We emailed the invite to ${email}.` });
-        } catch (emailErr) {
+        } else if (res.status > 0 && res.status < 500) {
+          setError(res.error ?? 'Could not send the invite.');
+        } else {
+          // The invite may exist without an email; share its link instead.
+          const token = await getPendingInviteToken(teamID, email);
+          if (!token) throw new Error('Could not send the invite.');
           const link = `${window.location.origin}/playbook/invite/${token}`;
-          const errMsg =
-            emailErr instanceof Error ? emailErr.message : 'Could not send the email automatically.';
+          const errMsg = 'The email could not be sent.';
           let copied = false;
           try {
             await navigator.clipboard.writeText(link);
@@ -122,12 +123,12 @@ export function TeamDetail({ teamID }: { teamID: string }) {
               </div>
             ),
           });
-          console.warn('[team-detail] sendInviteEmail failed, fell back to copy-link', emailErr);
+          console.warn('[team-detail] invite email failed, fell back to copy-link', res.status);
         }
         await refresh();
       } catch (err) {
         setError(formatSupabaseError(err, 'Send invite'));
-        console.error('[team-detail] createInvite failed', err);
+        console.error('[team-detail] send invite failed', err);
       }
     },
     [teamID, refresh],
@@ -147,22 +148,28 @@ export function TeamDetail({ teamID }: { teamID: string }) {
     [refresh],
   );
 
+  // A resend re-issues the invite (new link) through the same function.
   const handleResendInvite = useCallback(
-    async (inviteID: string, email: string) => {
+    async (invite: PendingInvite) => {
       if (resendingInviteID) return;
       try {
         setError(null);
-        setResendingInviteID(inviteID);
-        await resendInviteEmail({ inviteId: inviteID });
-        setNotice({ title: 'Invite re-sent', body: `We emailed the invite to ${email} again.` });
+        setResendingInviteID(invite.id);
+        const res = await sendTeamInvite(teamID, invite.email, invite.role);
+        if (res.ok) {
+          setNotice({ title: 'Invite re-sent', body: `We emailed the invite to ${invite.email} again.` });
+        } else {
+          setError(res.error ?? 'Could not resend the invite.');
+        }
+        await refresh();
       } catch (err) {
         setError(formatSupabaseError(err, 'Resend invite'));
-        console.error('[team-detail] resendInviteEmail failed', err);
+        console.error('[team-detail] resend invite failed', err);
       } finally {
         setResendingInviteID(null);
       }
     },
-    [resendingInviteID],
+    [resendingInviteID, teamID, refresh],
   );
 
   const handleRename = useCallback(
@@ -282,7 +289,7 @@ export function TeamDetail({ teamID }: { teamID: string }) {
                             <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted font-tight">{inv.role}</span>
                             <span className="text-[10px] font-mono text-faint">{formatExpiry(inv.expiresAt)}</span>
                             <SmallButton
-                              onClick={() => handleResendInvite(inv.id, inv.email)}
+                              onClick={() => handleResendInvite(inv)}
                               variant="ghost"
                               disabled={resendingInviteID === inv.id}
                             >

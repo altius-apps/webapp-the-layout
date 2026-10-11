@@ -545,8 +545,10 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('wfdf_games')
-      .select('id, wfdf_game_id, home_team_id, away_team_id, home_score, away_score, status, goals_count')
+      .select('id, wfdf_game_id, home_team_id, away_team_id, home_score, away_score, status, goals_count, detail_synced_at')
       .eq('event_id', eventId)
+      // A stable order, or pages can skip/repeat rows.
+      .order('id', { ascending: true })
       .range(from, from + 999);
     if (error) throw error;
     dbGames.push(...(data ?? []));

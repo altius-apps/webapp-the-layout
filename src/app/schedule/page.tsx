@@ -6,7 +6,7 @@
 // server-rendered — no client component needed for collapse state.
 
 import type { Metadata } from 'next';
-import { getCurrentGames, getAllGamesByYears, currentSeasonYear } from '@/lib/ufa/client';
+import { getCurrentGames, getAllGamesByYears, currentSeasonYear, UFA_FIRST_SEASON } from '@/lib/ufa/client';
 import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
@@ -23,6 +23,9 @@ import { getPulCurrentSeason } from '@/lib/pul/data';
 import { WulSchedule } from '@/components/wul/wul-schedule';
 
 export const revalidate = 300;
+
+// First PUL season in pul_games (checked 2026-10-11) — floor for the ?season= clamp.
+const PUL_FIRST_SEASON = 2022;
 
 export const metadata: Metadata = {
   title: 'Schedule · The Layout',
@@ -45,7 +48,11 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   if (league === 'pul') {
     const currentSeason = await getPulCurrentSeason();
-    const season = parseInt(searchParams.season ?? String(currentSeason), 10) || currentSeason;
+    const requestedSeason = parseInt(searchParams.season ?? '', 10);
+    const season =
+      requestedSeason >= PUL_FIRST_SEASON && requestedSeason <= currentSeasonYear()
+        ? requestedSeason
+        : currentSeason;
     return (
       <PageShell
         title="Schedule"
@@ -123,7 +130,11 @@ export default async function SchedulePage({ searchParams }: Props) {
   }
 
   const currentYear = currentSeasonYear();
-  const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
+  // Clamp to seasons that exist — an unbounded ?year= is an upstream fetch per
+  // garbage URL.
+  const requestedYear = parseInt(searchParams.year ?? '', 10);
+  const year =
+    requestedYear >= UFA_FIRST_SEASON && requestedYear <= currentYear ? requestedYear : currentYear;
   const isCurrentSeason = year === currentYear;
 
   // Fetch games for the selected year; overlay live data for current season.

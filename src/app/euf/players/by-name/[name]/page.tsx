@@ -114,6 +114,7 @@ export default async function EufPlayerPage({ params }: Props) {
                     <td className="py-2 pr-2 text-[13px] font-tight">
                       <Link
                         href={`/euf/events/${a.eventSlug}`}
+                        prefetch={false}
                         className="no-underline hover:underline text-ink"
                       >
                         {a.eventName}
@@ -123,6 +124,7 @@ export default async function EufPlayerPage({ params }: Props) {
                     <td className="py-2 px-2 text-[13px] font-tight">
                       <Link
                         href={`/euf/clubs/${encodeURIComponent(a.teamName)}?div=${encodeURIComponent(a.division)}&season=${a.year}`}
+                        prefetch={false}
                         className="inline-flex items-center gap-1.5 no-underline hover:underline text-muted min-w-0"
                       >
                         <EufFlag countryName={a.countryName} size={13} />
@@ -166,6 +168,7 @@ export default async function EufPlayerPage({ params }: Props) {
                 <li key={`${s.teamId}-${i}`}>
                   <Link
                     href={`/wfdf/teams/${s.teamId}`}
+                    prefetch={false}
                     className={[
                       'flex items-center gap-3 bg-surface rounded-card px-4 py-3',
                       'shadow-card transition-shadow hover:shadow-lift cursor-pointer no-underline',

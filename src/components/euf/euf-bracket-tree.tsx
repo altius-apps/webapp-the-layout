@@ -388,6 +388,7 @@ function MatchCard({
           {game.eufGameId != null && (
             <Link
               href={`/euf/g/${game.id}`}
+              prefetch={false}
               aria-label={`Box score: ${game.homeName} vs ${game.awayName}`}
               className="text-muted no-underline hover:text-accent transition-colors flex-shrink-0 text-[9px] font-bold tracking-[0.16em] uppercase font-tight"
             >
@@ -460,6 +461,7 @@ function TeamLine({
       {teamId ? (
         <Link
           href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}&season=${season}`}
+          prefetch={false}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
         >
           {inner}

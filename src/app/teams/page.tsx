@@ -6,7 +6,7 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { getStandings, getTeamStats, currentSeasonYear } from '@/lib/ufa/client';
+import { getStandings, getTeamStats, currentSeasonYear, UFA_FIRST_SEASON } from '@/lib/ufa/client';
 import { teamMeta, teamNameForYear, teamCityForYear, teamLogoForYear } from '@/lib/ufa/teams';
 import type { UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
@@ -113,7 +113,11 @@ export default async function TeamsPage({ searchParams }: Props) {
 
   // UFA branch (original behavior).
   const currentYear = currentSeasonYear();
-  const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
+  // Clamp to seasons that exist — an unbounded ?year= is an upstream fetch per
+  // garbage URL.
+  const requestedYear = parseInt(searchParams.year ?? '', 10);
+  const year =
+    requestedYear >= UFA_FIRST_SEASON && requestedYear <= currentYear ? requestedYear : currentYear;
   const isCurrentSeason = year === currentYear;
 
   let standings: UfaStanding[] = [];

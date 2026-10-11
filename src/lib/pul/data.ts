@@ -586,10 +586,11 @@ export interface PulStandingRow {
  * The Finals winner is flagged `champion` so the UI can badge them.
  */
 export async function getPulStandings(season: number): Promise<PulStandingRow[]> {
-  const [teams, games] = await Promise.all([
-    listPulTeams(),
-    listPulGames({ season, onlyFinal: true }),
-  ]);
+  // The whole schedule, not just finals: it also says which teams are in this
+  // season (pul_teams holds every franchise ever, so a 0-game team showed 0-0).
+  const [teams, schedule] = await Promise.all([listPulTeams(), listPulGames({ season })]);
+  const games = schedule.filter((g) => g.status === 'final');
+  const inSeason = new Set(schedule.flatMap((g) => [g.home.teamId, g.away.teamId]));
 
   const isPlayoff = (label: string) => label === 'semifinals' || label === 'finals';
 
@@ -628,7 +629,9 @@ export async function getPulStandings(season: number): Promise<PulStandingRow[]>
     }
   }
 
+  // No schedule posted yet: keep listing every team rather than none.
   return teams
+    .filter((team) => inSeason.size === 0 || inSeason.has(team.id))
     .map((team) => {
       const r = rec.get(team.id) ?? { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 };
       return {

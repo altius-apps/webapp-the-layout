@@ -389,6 +389,7 @@ function TeamLine({
       {teamId ? (
         <Link
           href={`/wfdf/teams/${teamId}`}
+          prefetch={false}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
           onClick={(e) => e.stopPropagation()}
         >

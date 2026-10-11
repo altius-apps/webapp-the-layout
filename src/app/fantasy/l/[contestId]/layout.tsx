@@ -14,6 +14,8 @@ import { AppShell } from '@/components/page-shell';
 import { getContest, getLeague } from '@/lib/fantasy/leagues';
 import { LeagueHeader } from '@/components/fantasy/league-header';
 import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
+import { EnsureContestTeam } from '@/components/fantasy/ensure-contest-team';
+import { LeagueContentFrame } from '@/components/fantasy/league-content-frame';
 
 export default async function LeagueLayout({
   children,
@@ -46,9 +48,11 @@ export default async function LeagueLayout({
         <LeagueHeader contest={contest} league={league} />
       </div>
       <LeagueSectionNav contest={contest} />
-      <div className="px-5 pt-6 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
-        {children}
-      </div>
+      <LeagueContentFrame>
+        <EnsureContestTeam contestId={contest.id} leagueId={contest.leagueId} seasonYear={contest.seasonYear}>
+          {children}
+        </EnsureContestTeam>
+      </LeagueContentFrame>
     </AppShell>
   );
 }

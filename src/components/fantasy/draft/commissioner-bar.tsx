@@ -48,8 +48,8 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
   };
 
   return (
-    <div className="mb-3">
-      <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-2">
+    <div className="bg-surface rounded-card-lg shadow-card px-4 py-3.5 lg:px-5">
+      <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-muted font-tight mb-2">
         Commissioner
       </div>
       <div className="flex items-center gap-2 flex-wrap">
@@ -58,7 +58,7 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
           onClick={confirmUndo}
           disabled={busy || pickCount === 0}
           className={[
-            'px-3.5 py-2 rounded-full min-h-[36px] border-[1.5px] border-ink/15',
+            'px-4 py-2 rounded-full min-h-[44px] border-[1.5px] border-ink/15',
             'font-tight text-[11px] font-bold tracking-[0.08em] uppercase text-ink transition-opacity duration-150',
             'hover:opacity-80 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed',
           ].join(' ')}
@@ -70,7 +70,7 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
           onClick={confirmSkip}
           disabled={busy}
           className={[
-            'px-3.5 py-2 rounded-full min-h-[36px] border-[1.5px] border-ink/15',
+            'px-4 py-2 rounded-full min-h-[44px] border-[1.5px] border-ink/15',
             'font-tight text-[11px] font-bold tracking-[0.08em] uppercase text-ink transition-opacity duration-150',
             'hover:opacity-80 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed',
           ].join(' ')}

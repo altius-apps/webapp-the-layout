@@ -1,7 +1,7 @@
 'use client';
 
 // Settings for /fantasy/l/[contestId]/settings. The commissioner gets every
-// card; any other member gets Leave league (Hunter, 2026-10-09).
+// card; any other member gets their team name + Leave league (Hunter, 2026-10-09).
 // Rendered inside the shared league layout (AppShell + header/nav already
 // wrap this), so this owns ONLY the heading + cards, in mobile's order:
 // Name → Logo → Teams/Limits → Format + Waivers (weekly-stats only) → Roster →
@@ -31,6 +31,7 @@ import { FormatCard } from './format-card';
 import { WaiversCard } from './waivers-card';
 import { DeleteLeagueCard } from './delete-league-card';
 import { LeaveLeagueCard } from './leave-league-card';
+import { TeamNameCard } from './team-name-card';
 
 const HEADING_CLASS =
   'font-display italic text-[22px] lg:text-[26px] font-bold tracking-[-0.02em] leading-[0.95] text-ink';
@@ -92,6 +93,7 @@ export function SettingsContent({ contest, league }: Props) {
         <h2 id="league-settings-heading" className={HEADING_CLASS}>
           Settings
         </h2>
+        {myRole === 'member' && <TeamNameCard contest={contest} />}
         <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
           <p className="text-muted font-tight text-[14px]">
             {myRole === 'member'
@@ -111,6 +113,8 @@ export function SettingsContent({ contest, league }: Props) {
       <h2 id="league-settings-heading" className={HEADING_CLASS}>
         Settings
       </h2>
+
+      <TeamNameCard contest={contest} />
 
       <NameCard leagueId={contest.leagueId} initialName={leagueName} />
 

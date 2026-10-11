@@ -61,7 +61,7 @@ import { loadNameAliases } from '@/lib/name-aliases';
 import type { PlayerKind } from '@/lib/player-content/types';
 // RPC fast path. This module imports our TYPES only (`import type`), so the
 // cycle is erased at compile time and there's no runtime init-order hazard.
-import { getProfileViaRpc } from './unified-player-rpc';
+import { getProfileViaRpc, wfdfChampionTitles } from './unified-player-rpc';
 
 // ── Output shape ─────────────────────────────────────────────────────────
 
@@ -217,6 +217,13 @@ export interface EufSeasonStint {
   };
 }
 
+/** WFDF world titles for one event series ("WUCC", "WBUC", ...), newest year
+ *  first — the shape ChampionBanner takes (one banner per series). */
+export interface WfdfChampionTitle {
+  event: string;
+  years: number[];
+}
+
 export type SeasonStint =
   | UfaSeasonStint
   | UsauSeasonStint
@@ -313,6 +320,8 @@ export interface UnifiedPlayerProfile {
   } | null;
   championYearsUfa: number[];
   championYearsUsau: number[];
+  /** WFDF world titles, derived from the wfdf stints' isChampion. */
+  championTitlesWfdf: WfdfChampionTitle[];
   /** The player's most-recent USAU gender division ('Men'|'Women'|'Mixed'), or
    *  null if they have no USAU stints. Lets the profile sync the nav's division
    *  so the "Teams" tab lands on the right division (e.g. a Mixed player → Mixed
@@ -775,6 +784,7 @@ async function _getUnifiedPlayerProfile(
     wul: wulCareerBlock,
     championYearsUfa: sideUfa?.championYears ?? [],
     championYearsUsau: sideUsau?.championYears ?? [],
+    championTitlesWfdf: wfdfChampionTitles(years),
     mostRecentUsauDivision,
   };
 }

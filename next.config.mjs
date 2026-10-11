@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  async headers() {
+    // iOS Universal Links: the extensionless AASA file must be served as JSON.
+    return [
+      {
+        source: '/.well-known/apple-app-site-association',
+        headers: [{ key: 'Content-Type', value: 'application/json' }],
+      },
+    ];
+  },
   async redirects() {
     // Fantasy V2 hub + nav rework (2026-09-07): the game-picker hub collapsed
     // into a single Sleeper-style front door at /fantasy, and every in-league
