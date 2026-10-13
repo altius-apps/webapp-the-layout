@@ -17,9 +17,12 @@
 //
 // Dedup: claim-before-send into game_notifications (insert-ignore on the
 // (league, game_id, category) PK) — the same ledger the game sender uses, so
-// a retried trigger/cron tick never double-sends. Preference gate:
-// notification_prefs.push_enabled && notification_prefs.fantasy (missing row
-// = on). Tokens: push_tokens; DeviceNotRegistered tickets prune the token.
+// a retried trigger/cron tick never double-sends. Preference gate, per push
+// and per category: notification_prefs.push_enabled && .fantasy (the Fantasy
+// master switch) && the category's own toggle (CATEGORY_PREF; mobile Settings →
+// Notifications, 2026-10-13). A missing row or null column = on; an unknown
+// category = off. Tokens: push_tokens; DeviceNotRegistered tickets prune the
+// token.
 //
 // Auth: verify_jwt OFF, manual service-key digest compare (same pattern as
 // send-game-notifications) — the trigger/cron/scorer all send the vault
@@ -32,6 +35,17 @@ const EXPO_BATCH = 100;
 const LEAGUE = 'fantasy';
 
 type Category = 'draft_reminder' | 'draft_live' | 'draft_on_clock' | 'draft_complete' | 'matchup_result';
+
+const CATEGORY_PREF: Record<Category, string> = {
+  draft_reminder: 'fantasy_draft_reminders',
+  draft_live: 'fantasy_draft_updates',
+  draft_complete: 'fantasy_draft_updates',
+  draft_on_clock: 'fantasy_on_clock',
+  matchup_result: 'fantasy_matchups',
+};
+const PREF_COLUMNS = ['push_enabled', 'fantasy', ...new Set(Object.values(CATEGORY_PREF))];
+// .in() lists ride in the URL and PostgREST caps a response at 1000 rows.
+const IN_CHUNK = 200;
 
 interface Push {
   userIds: string[];
@@ -118,23 +132,32 @@ async function deliver(sb: SupabaseClient, pushes: Push[], dryRun: boolean) {
   const summary: Array<{ dedupId: string; category: Category; users: number; recipients: number }> = [];
   if (pushes.length === 0) return { claimed: 0, sent: 0, summary };
 
-  // 1. Preference gate.
+  // 1. Preference gate. A failed read throws: sending to everyone would ignore
+  // every opt-out.
   const allUsers = [...new Set(pushes.flatMap((p) => p.userIds))];
-  const { data: prefRows } = await sb
-    .from('notification_prefs')
-    .select('user_id, push_enabled, fantasy')
-    .in('user_id', allUsers);
-  const prefs = new Map<string, { push_enabled: boolean; fantasy: boolean }>();
-  for (const r of prefRows ?? []) prefs.set(r.user_id as string, { push_enabled: r.push_enabled as boolean, fantasy: r.fantasy as boolean });
-  const allowed = (u: string) => {
-    const p = prefs.get(u) ?? { push_enabled: true, fantasy: true };
-    return p.push_enabled && p.fantasy;
+  const prefs = new Map<string, Record<string, unknown>>();
+  for (const ids of chunk(allUsers, IN_CHUNK)) {
+    const { data: prefRows, error: prefErr } = await sb
+      .from('notification_prefs')
+      .select(`user_id, ${PREF_COLUMNS.join(', ')}`)
+      .in('user_id', ids);
+    if (prefErr) throw prefErr;
+    // The column list is built at runtime, which supabase-js can't type.
+    for (const r of (prefRows ?? []) as unknown as Record<string, unknown>[]) prefs.set(r.user_id as string, r);
+  }
+  const allowed = (u: string, category: Category) => {
+    if (!Object.hasOwn(CATEGORY_PREF, category)) return false;
+    const column = CATEGORY_PREF[category];
+    const p = prefs.get(u);
+    if (!p) return true;
+    return p.push_enabled !== false && p.fantasy !== false && p[column] !== false;
   };
+  const targetsOf = (p: Push) => p.userIds.filter((u) => allowed(u, p.category));
 
   // 2. Claim (insert-ignore) — only rows that actually inserted get sent.
-  const eligible = pushes.filter((p) => p.userIds.some(allowed));
+  const eligible = pushes.filter((p) => targetsOf(p).length > 0);
   if (eligible.length === 0 || dryRun) {
-    for (const p of eligible) summary.push({ dedupId: p.dedupId, category: p.category, users: p.userIds.filter(allowed).length, recipients: 0 });
+    for (const p of eligible) summary.push({ dedupId: p.dedupId, category: p.category, users: targetsOf(p).length, recipients: 0 });
     return { claimed: 0, sent: 0, summary };
   }
   const { data: claimedRows, error: claimErr } = await sb
@@ -150,19 +173,23 @@ async function deliver(sb: SupabaseClient, pushes: Push[], dryRun: boolean) {
   if (claimed.length === 0) return { claimed: 0, sent: 0, summary };
 
   // 3. Tokens.
-  const users = [...new Set(claimed.flatMap((p) => p.userIds.filter(allowed)))];
-  const { data: tokenRows } = await sb.from('push_tokens').select('user_id, token').in('user_id', users);
+  const users = [...new Set(claimed.flatMap(targetsOf))];
   const tokensByUser = new Map<string, string[]>();
-  for (const r of tokenRows ?? []) {
-    const list = tokensByUser.get(r.user_id as string) ?? [];
-    list.push(r.token as string);
-    tokensByUser.set(r.user_id as string, list);
+  for (const ids of chunk(users, IN_CHUNK)) {
+    const { data: tokenRows, error: tokenErr } = await sb.from('push_tokens').select('user_id, token').in('user_id', ids);
+    // Already claimed, so a retry won't resend: log it rather than lose it silently.
+    if (tokenErr) console.error('[notify-fantasy] push_tokens read failed', tokenErr);
+    for (const r of tokenRows ?? []) {
+      const list = tokensByUser.get(r.user_id as string) ?? [];
+      list.push(r.token as string);
+      tokensByUser.set(r.user_id as string, list);
+    }
   }
 
   // 4. Send.
   let sent = 0;
   for (const p of claimed) {
-    const targets = p.userIds.filter(allowed);
+    const targets = targetsOf(p);
     const messages = targets.flatMap((u) => (tokensByUser.get(u) ?? []).map((to) => ({ to, title: p.title, body: p.body, data: p.data })));
     const delivered = messages.length > 0 ? await sendExpoPushes(sb, messages) : 0;
     sent += delivered;

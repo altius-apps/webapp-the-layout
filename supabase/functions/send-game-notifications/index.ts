@@ -424,6 +424,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+// .in() id lists ride in the URL: the gateway 400s past ~650 uuids, and a
+// response caps at 1000 rows. Both reads below run after the claim, so a
+// failure there loses the tick's notices for good.
+const IN_CHUNK = 200;
+
 function ufaIsPlayoff(week: string | null, year: number): boolean {
   if (!week) return false;
   const m = /^week-(\d+)$/.exec(week);
@@ -1761,12 +1766,15 @@ async function resolveAudiences(
 
   if (allUsers.size === 0) return new Map(notices.map((n) => [n, []]));
 
-  const { data: prefRows, error: prefErr } = await sb
-    .from('notification_prefs')
-    .select('user_id, push_enabled, game_start, game_final, event_updates, player_stats')
-    .in('user_id', [...allUsers]);
-  if (prefErr) throw prefErr;
-  const prefs = new Map<string, Prefs>((prefRows ?? []).map((r) => [r.user_id, r]));
+  const prefs = new Map<string, Prefs>();
+  for (const ids of chunk([...allUsers], IN_CHUNK)) {
+    const { data: prefRows, error: prefErr } = await sb
+      .from('notification_prefs')
+      .select('user_id, push_enabled, game_start, game_final, event_updates, player_stats')
+      .in('user_id', ids);
+    if (prefErr) throw prefErr;
+    for (const r of prefRows ?? []) prefs.set(r.user_id, r);
+  }
 
   const audiences = new Map<Notice, string[]>();
   for (const n of notices) {
@@ -1903,8 +1911,8 @@ Deno.serve(async (req) => {
 
   const userIds = [...new Set([...audiences.values()].flat())];
   const tokensByUser = new Map<string, string[]>();
-  if (userIds.length > 0) {
-    const { data, error } = await sb.from('push_tokens').select('user_id, token').in('user_id', userIds);
+  for (const ids of chunk(userIds, IN_CHUNK)) {
+    const { data, error } = await sb.from('push_tokens').select('user_id, token').in('user_id', ids);
     if (error) throw error;
     for (const r of data ?? []) {
       const list = tokensByUser.get(r.user_id) ?? [];
