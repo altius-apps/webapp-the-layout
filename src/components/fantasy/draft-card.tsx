@@ -8,7 +8,8 @@
 //
 // States: no draft row → commissioner "Set up the draft" / member waiting
 // copy; scheduled → date + live countdown + snake/auction summary + "Enter
-// draft room" (enabled only inside the 4h pre-open window); missed /
+// draft room" (always open, so a member can leave and re-join — Hunter,
+// 2026-10-13); missed /
 // rosters-not-ready → warning strips; live → full-bleed accent CTA;
 // complete → "View results". Signed-out users see nothing (getDraftReadiness
 // is signed-in only).
@@ -19,8 +20,6 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { getDraftReadiness, getDraft, type Draft, type DraftReadiness } from '@/lib/fantasy/draft-room';
 import { getMyLeagueRole } from '@/lib/fantasy/leagues';
 import type { ContestView } from '@/lib/fantasy/leagues';
-
-const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
 // Last-seen card per contest, so switching tabs or reloading paints the card at
 // once while it re-fetches in the background; a status change (scheduled →
@@ -250,7 +249,6 @@ export function DraftCard({ contest, data }: { contest: ContestView; data: Draft
   // ── Scheduled ────────────────────────────────────────────────────────────
   const scheduledAtMs = draft.scheduledAt ? new Date(draft.scheduledAt).getTime() : null;
   const msUntil = scheduledAtMs != null ? scheduledAtMs - now : null;
-  const roomOpen = msUntil != null && msUntil <= FOUR_HOURS_MS;
   const typeSummary =
     draft.draftType === 'auction'
       ? `Auction · $${draft.budget} budget · ${draft.rounds} rounds`
@@ -271,23 +269,16 @@ export function DraftCard({ contest, data }: { contest: ContestView; data: Draft
       <p className="font-tight text-[13px] text-muted mb-3.5">{typeSummary}</p>
 
       <Link
-        href={roomOpen ? roomPath : '#'}
-        aria-disabled={!roomOpen}
-        onClick={(e) => {
-          if (!roomOpen) e.preventDefault();
-        }}
+        href={roomPath}
         className={[
           'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
-          'font-tight text-[12px] font-bold tracking-[0.06em] uppercase transition-opacity duration-150',
-          roomOpen
-            ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
-            : 'bg-ink/[0.08] text-faint cursor-not-allowed',
+          'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase',
+          'hover:opacity-90 transition-opacity duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
         ].join(' ')}
       >
         Enter draft room
       </Link>
-      {!roomOpen && <p className="mt-2.5 font-tight text-[11.5px] text-faint">Room opens 4 hours before</p>}
 
       {readiness.missed && (
         <div className="flex gap-2.5 px-3.5 py-3 rounded-card-sm bg-live/[0.08] mt-3.5">

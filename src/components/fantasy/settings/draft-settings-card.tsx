@@ -2,11 +2,14 @@
 
 // DraftSettingsCard — Settings → Draft. Three states, web port of mobile's
 // DraftSettingsCard.tsx:
-//   1. No draft yet   — commissioner configures type + settings + a time,
-//      then schedules it (scheduleDraft / scheduleAuctionDraft).
+//   1. No draft yet   — commissioner configures type + settings + a time at
+//      least 30 minutes out (no manual start — Hunter, 2026-10-13), then
+//      schedules it (scheduleDraft / scheduleAuctionDraft).
 //   2. Scheduled      — read-only summary + a reschedule form. A MISSED
 //      draft (readiness.missed) shows a banner and the reschedule floor
 //      shifts to originalScheduledAt + 1 day when missed, else now + 30 min (readiness.rescheduleFloor).
+//      Both pickers open on the first half-hour slot past the floor, not the
+//      floor itself: the RPC re-takes now() on submit.
 //   3. Live / complete — read-only summary + a link into the draft room.
 //
 // Team-count gating: the RPC itself refuses to schedule below minTeams, so we
@@ -27,7 +30,7 @@ import {
 import type { ContestView } from '@/lib/fantasy/leagues';
 import { teamSize } from '@/lib/fantasy/competitions';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
-import { Card, SaveButton, Feedback, NumberField, ToggleSwitch } from './shared';
+import { Card, SaveButton, Feedback, NumberField } from './shared';
 
 interface Props {
   contest: ContestView;
@@ -95,26 +98,31 @@ function ScheduleForm({
   const [budget, setBudget] = useState(200);
   const [bidSeconds, setBidSeconds] = useState(15);
   const [minBid, setMinBid] = useState(1);
-  const [manual, setManual] = useState(readiness.defaultAt == null);
-  const [at, setAt] = useState<string | null>(readiness.defaultAt);
+  const [floor] = useState(() => noticeFloor(readiness.earliestAt));
+  const [at, setAt] = useState<string | null>(() => startAt(readiness.defaultAt, floor));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const belowMin = readiness.teamCount < readiness.minTeams;
-  const canSchedule = !belowMin && (manual || !!at) && !saving;
+  const canSchedule = !belowMin && !!at && !saving;
 
   const schedule = async () => {
-    if (!canSchedule) return;
+    if (!canSchedule || !at) return;
+    // The picker's times were set when the form opened; the notice counts from now.
+    if (new Date(at).getTime() < Date.now() + NOTICE_MS) {
+      setError("Give the league at least 30 minutes' notice — pick a later time.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       if (type === 'snake') {
-        await scheduleDraft({ contestId: contest.id, at: manual ? null : at, rounds });
+        await scheduleDraft({ contestId: contest.id, at, rounds });
       } else {
         await scheduleAuctionDraft({
           contestId: contest.id,
-          at: manual ? null : at,
+          at,
           rounds,
           budget,
           bidSeconds,
@@ -164,25 +172,11 @@ function ScheduleForm({
           </>
         )}
 
-        <div className="flex items-center justify-between gap-3 max-w-[440px]">
-          <div>
-            <p className="font-tight text-[13px] font-semibold text-ink">Start manually</p>
-            <p className="font-tight text-[11.5px] text-faint leading-snug">
-              Skip scheduling — start the draft yourself whenever you&apos;re ready.
-            </p>
-          </div>
-          <ToggleSwitch checked={manual} onChange={() => setManual((v) => !v)} label="Start draft manually" />
-        </div>
+        <p className="font-tight text-[12px] text-muted leading-snug">
+          Give the league at least 30 minutes&apos; notice.
+        </p>
 
-        {!manual && (
-          <DateTimeField
-            label="Draft time"
-            value={at}
-            onChange={setAt}
-            min={readiness.earliestAt}
-            max={readiness.lockAt}
-          />
-        )}
+        <DateTimeField label="Draft time" value={at} onChange={setAt} min={floor} max={readiness.lockAt} />
 
         <div className="flex items-center justify-between gap-3">
           <p className="font-tight text-[12px] text-live">
@@ -231,7 +225,7 @@ function ScheduledView({
   onSaved: () => void;
 }) {
   const rescheduleFloor = readiness.rescheduleFloor ?? readiness.earliestAt;
-  const [at, setAt] = useState<string | null>(draft.scheduledAt ?? rescheduleFloor);
+  const [at, setAt] = useState<string | null>(() => startAt(draft.scheduledAt, rescheduleFloor));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -364,6 +358,29 @@ function PillField({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 60;
+const NOTICE_MS = 30 * 60 * 1000;
+
+/** The earliest draft time: 30 minutes from now, or the window's start if later. */
+function noticeFloor(earliestAt: string | null): string {
+  const ms = Math.max(Date.now() + NOTICE_MS, earliestAt ? new Date(earliestAt).getTime() : 0);
+  return new Date(ms).toISOString();
+}
+
+/** The first local half-hour slot (the picker's steps) at or after `iso`. A
+ *  now-based floor carries seconds, so this lands past it rather than on it. */
+function firstSlot(iso: string): string {
+  const d = new Date(iso);
+  if (d.getMinutes() % 30 !== 0 || d.getSeconds() !== 0 || d.getMilliseconds() !== 0) {
+    d.setMinutes(d.getMinutes() - (d.getMinutes() % 30) + 30, 0, 0);
+  }
+  return d.toISOString();
+}
+
+/** The picker's opening value: `preferred` while it clears the floor, else the first slot after it. */
+function startAt(preferred: string | null, floor: string | null): string | null {
+  if (!floor) return preferred;
+  return preferred && new Date(preferred).getTime() >= new Date(floor).getTime() ? preferred : firstSlot(floor);
+}
 
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

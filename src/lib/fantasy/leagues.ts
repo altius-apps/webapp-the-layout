@@ -121,7 +121,7 @@ export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary 
     .select('id, name, owner_id, created_at, logo_url, logo_icon')
     .eq('id', leagueId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   if (!data) return null;
 
   const [{ count: members }, { count: contests }] = await Promise.all([
@@ -148,7 +148,7 @@ export async function getLeagueMembers(leagueId: string): Promise<LeagueMember[]
     .select('user_id, role, member_display_name, member_username, joined_at')
     .eq('league_id', leagueId)
     .order('joined_at');
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data ?? []).map((r: Record<string, unknown>) => ({
     userId: r.user_id as string,
     role: (r.role as LeagueRole) ?? 'member',
@@ -165,7 +165,7 @@ export async function getLeagueContests(leagueId: string): Promise<ContestView[]
     .select('id, league_id, competition, season_year, name, status, settings, created_at')
     .eq('league_id', leagueId)
     .order('created_at', { ascending: false });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data ?? [])
     .map((r: Record<string, unknown>) => mapContestRow(r))
     .filter((c: ContestView | null): c is ContestView => c !== null);
@@ -177,7 +177,7 @@ export async function getContest(contestId: string): Promise<ContestView | null>
     .select('id, league_id, competition, season_year, name, status, settings, created_at')
     .eq('id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? mapContestRow(data as Record<string, unknown>) : null;
 }
 
@@ -188,7 +188,7 @@ export async function getContestPeriods(contestId: string): Promise<ContestPerio
     .select('period, lock_at, unlock_at, game_count, complete')
     .eq('contest_id', contestId)
     .order('lock_at');
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data ?? []).map((r: Record<string, unknown>) => ({
     period: r.period as string,
     lockAt: (r.lock_at as string) ?? null,
@@ -224,7 +224,7 @@ export async function getContestStandings(contestId: string): Promise<Leaderboar
     .select('id, team_name, owner_display_name, owner_username')
     .eq('contest_id', contestId)
     .limit(500);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   if (!teams || teams.length === 0) return [];
 
   const ids = teams.map((t: Record<string, unknown>) => t.id as string);
@@ -271,7 +271,7 @@ export async function getContestTeam(teamId: string): Promise<ContestTeamView | 
     .select('id, contest_id, team_name, owner_id, owner_display_name, owner_username')
     .eq('id', teamId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   if (!team) return null;
 
   const { data: scores } = await anon()
@@ -335,7 +335,7 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
     .select('league_id, role, fantasy_leagues:league_id (name, logo_url, logo_icon)')
     .eq('user_id', user.id)
     .order('joined_at', { ascending: false });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   const rows = (data ?? []) as Record<string, unknown>[];
   if (rows.length === 0) return [];
 
@@ -447,14 +447,14 @@ export async function createLeague(name: string): Promise<string> {
   const bad = moderateName(n, 'League name');
   if (bad) throw new Error(bad);
   const { data, error } = await sessionClient().rpc('fantasy_create_league', { p_name: n });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data as string;
 }
 
 /** The league's shareable join code — commissioner-only (RPC enforces). */
 export async function getLeagueCode(leagueId: string): Promise<string> {
   const { data, error } = await sessionClient().rpc('fantasy_get_league_code', { p_league: leagueId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data as string;
 }
 
@@ -480,7 +480,7 @@ export async function joinLeagueByCode(code: string): Promise<string> {
   const c = fromLink ? fromLink[1] : fromText ? fromText[0] : code.trim();
   if (!c) throw new Error('Enter an invite code.');
   const { data, error } = await sessionClient().rpc('fantasy_join_league', { p_code: c });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data as string;
 }
 
@@ -498,7 +498,7 @@ export async function previewLeagueInvite(
 /** Accept an email invite (binds to the caller's auth email). Returns league id. */
 export async function acceptLeagueInvite(token: string): Promise<string> {
   const { data, error } = await sessionClient().rpc('fantasy_accept_league_invite', { p_token: token });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data as string;
 }
 
@@ -512,7 +512,7 @@ export async function renameLeague(leagueId: string, name: string): Promise<stri
     p_league: leagueId,
     p_name: n,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return n;
 }
 
@@ -522,21 +522,21 @@ export async function removeLeagueMember(leagueId: string, userId: string): Prom
     p_league: leagueId,
     p_user: userId,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Leave a league. An owner's league passes to another member first
  *  (fantasy_hand_off_league); a sole member must delete it instead. */
 export async function leaveLeague(leagueId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_leave_league', { p_league: leagueId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Owner-only: deletes the league and everything in it (contests, teams,
  *  rosters, drafts, chat) for every member. Refused during a live draft. */
 export async function deleteLeague(leagueId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_delete_league', { p_league: leagueId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 // ─── Account-deletion pre-flight (live drafts) ───────────────────────────────
@@ -552,7 +552,7 @@ export interface DraftBlockingDeletion {
  *  leagues never block — they pass to another member. */
 export async function getDraftsBlockingAccountDeletion(): Promise<DraftBlockingDeletion[]> {
   const { data, error } = await sessionClient().rpc('fantasy_drafts_blocking_account_deletion');
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     leagueId: r.league_id as string,
     leagueName: r.league_name as string,
@@ -595,7 +595,7 @@ export async function resolveEventForCompetition(
       .or('name.ilike.%nationals%,name.ilike.%national championships%,name.ilike.%college championships%');
     if (seasonYear != null) q = q.eq('season', seasonYear);
     const { data, error } = await q.order('start_date', { ascending: true }).limit(20);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     // Exclude tune-ups/showcases that merely mention "nationals".
     const hits = (data ?? []).filter((r: Record<string, unknown>) => {
       const n = (r.name as string).toLowerCase();
@@ -619,7 +619,7 @@ export async function resolveEventForCompetition(
     let q = anon().from('wfdf_events').select('id, name, year, start_date, end_date').gt('start_date', today);
     if (seasonYear != null) q = q.eq('year', seasonYear);
     const { data, error } = await q.order('start_date', { ascending: true }).limit(1).maybeSingle();
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     if (!data) return null;
     return {
       eventId: data.id as string,
@@ -637,7 +637,7 @@ export async function resolveEventForCompetition(
       q = match === 'kind' ? q.eq('kind', 'eucf') : q.ilike('name', '%EUCF%');
       if (seasonYear != null) q = q.eq('year', seasonYear);
       const { data, error } = await q.order('start_date', { ascending: true }).limit(1).maybeSingle();
-      if (error) throw error;
+      if (error) throw new Error(error.message);
       if (data) {
         return {
           eventId: data.id as string,
@@ -753,7 +753,7 @@ export async function createContest(
     if ((error as { code?: string }).code === '23505') {
       throw new Error('This league already has a contest for that competition and season.');
     }
-    throw error;
+    throw new Error(error.message);
   }
   const contestId = data.id as string;
 
@@ -786,7 +786,7 @@ export async function getMyContestTeam(
     .eq('owner_id', user.id)
     .eq('contest_id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? { id: data.id as string, teamName: data.team_name as string } : null;
 }
 
@@ -822,7 +822,7 @@ export async function createContestTeam(
     if ((error as { code?: string }).code === '23505') {
       throw new Error('You already have a team in this contest.');
     }
-    throw error;
+    throw new Error(error.message);
   }
   return data.id as string;
 }
@@ -846,7 +846,7 @@ export async function ensureMyContestTeam(contestId: string, leagueId: string, s
     .select('display_name')
     .eq('id', user.id)
     .single();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   const displayName = (profile.display_name as string | null)?.trim();
   if (!displayName || moderateName(displayName)) return false;
   await createContestTeam(contestId, displayName.slice(0, 40), seasonYear);
@@ -861,7 +861,7 @@ export async function renameContestTeam(teamId: string, teamName: string): Promi
   const bad = moderateName(name, 'Team name');
   if (bad) throw new Error(bad);
   const { error } = await sessionClient().from('fantasy_teams').update({ team_name: name }).eq('id', teamId);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 // ─── League limits, logo, format (commissioner-only RPCs) ────────────────────
@@ -874,7 +874,7 @@ export async function setContestLimits(contestId: string, maxTeams: number, unli
     p_max_teams: maxTeams,
     p_unlimited: unlimited ?? false,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Set a league's logo — a custom uploaded url XOR a stock icon token, never
@@ -885,7 +885,7 @@ export async function setLeagueLogo(leagueId: string, logo: { url: string | null
     p_url: logo.url,
     p_icon: logo.icon,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Set a weekly-stats contest's scoring format (h2h or points). Commissioner-
@@ -895,7 +895,7 @@ export async function setContestFormat(contestId: string, format: 'h2h' | 'point
     p_contest: contestId,
     p_format: format,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Generate the H2H schedule for a contest (needs >=2 teams, >=3 future
@@ -903,7 +903,7 @@ export async function setContestFormat(contestId: string, format: 'h2h' | 'point
  *  completion, but exposed for manual/no-draft leagues too. */
 export async function generateSchedule(contestId: string): Promise<number> {
   const { data, error } = await sessionClient().rpc('fantasy_generate_schedule', { p_contest: contestId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data as number) ?? 0;
 }
 
@@ -961,7 +961,7 @@ export async function getMatchups(contestId: string, period?: string): Promise<M
     .order('period');
   if (period) q = q.eq('period', period);
   const { data, error } = await q;
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapMatchup);
 }
 
@@ -969,7 +969,7 @@ export async function getMatchups(contestId: string, period?: string): Promise<M
  *  Public read. */
 export async function getH2HStandings(contestId: string): Promise<H2HStandingRow[]> {
   const { data, error } = await anon().rpc('fantasy_h2h_standings', { p_contest: contestId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     teamId: r.team_id as string,
     teamName: r.team_name as string,
@@ -1016,7 +1016,7 @@ export async function getTeamPlayers(contestId: string, teamId?: string): Promis
     .eq('contest_id', contestId);
   if (teamId) q = q.eq('team_id', teamId);
   const { data, error } = await q;
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapTeamPlayer);
 }
 
@@ -1036,7 +1036,7 @@ export async function addDrop(
     p_add_id: add.playerId,
     p_add_name: add.playerName,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 // ─── Team transactions (public) ──────────────────────────────────────────────
@@ -1059,7 +1059,7 @@ export async function getTeamTransactions(contestId: string, teamId: string, lim
     .eq('team_id', teamId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: r.id as string,
     kind: r.kind as TeamTransaction['kind'],
@@ -1117,7 +1117,7 @@ function mapTrade(r: Record<string, unknown>): Trade {
 /** Public: every trade in a contest, newest first. */
 export async function getTrades(contestId: string): Promise<Trade[]> {
   const { data, error } = await sessionClient().from('fantasy_trades').select('*').eq('contest_id', contestId).order('created_at', { ascending: false }).limit(200);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapTrade);
 }
 
@@ -1130,7 +1130,7 @@ export async function proposeTrade(contestId: string, receiverTeamId: string, gi
     p_get: get,
     p_note: note ?? null,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapTrade(data as Record<string, unknown>);
 }
 
@@ -1139,7 +1139,7 @@ export type TradeAction = 'accept' | 'reject' | 'cancel' | 'veto' | 'approve';
 /** accept/reject (receiver) · cancel (proposer) · veto/approve (commissioner). */
 export async function respondTrade(tradeId: string, action: TradeAction): Promise<Trade> {
   const { data, error } = await sessionClient().rpc('fantasy_respond_trade', { p_trade: tradeId, p_action: action });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapTrade(data as Record<string, unknown>);
 }
 
@@ -1188,13 +1188,13 @@ export async function setWaiverSettings(contestId: string, mode: WaiverMode, bud
     p_budget: budget,
     p_hours: hours,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Public: players currently inside their waiver window. */
 export async function getWaiverPlayers(contestId: string): Promise<WaiverPlayer[]> {
   const { data, error } = await anon().from('fantasy_waiver_players').select('*').eq('contest_id', contestId).limit(500);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     contestId: r.contest_id as string,
     playerLeague: r.player_league as string,
@@ -1222,14 +1222,14 @@ function mapWaiverClaim(r: Record<string, unknown>): WaiverClaim {
 /** My pending claims + everyone's resolved claims (RLS). Newest first. */
 export async function getWaiverClaims(contestId: string): Promise<WaiverClaim[]> {
   const { data, error } = await sessionClient().from('fantasy_waiver_claims').select('*').eq('contest_id', contestId).order('created_at', { ascending: false }).limit(200);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapWaiverClaim);
 }
 
 /** FAAB dollars already spent by a team. */
 export async function getFaabSpent(contestId: string, teamId: string): Promise<number> {
   const { data, error } = await anon().rpc('fantasy_faab_spent', { p_contest: contestId, p_team: teamId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return Number(data ?? 0);
 }
 
@@ -1244,11 +1244,11 @@ export async function claimWaiver(contestId: string, add: TradeRef, bid: number,
     p_drop_league: drop?.playerLeague ?? null,
     p_drop_id: drop?.playerId ?? null,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapWaiverClaim(data as Record<string, unknown>);
 }
 
 export async function cancelWaiverClaim(claimId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_cancel_waiver_claim', { p_claim: claimId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }

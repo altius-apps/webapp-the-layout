@@ -44,7 +44,7 @@ export async function getDraftStatusServer(contestId: string): Promise<DraftStat
     .select('status')
     .eq('contest_id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? (data.status as DraftStatus) : null;
 }
 
@@ -55,7 +55,7 @@ export async function getDraftStatusPublic(contestId: string): Promise<DraftStat
     .select('status')
     .eq('contest_id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? (data.status as DraftStatus) : null;
 }
 
@@ -75,6 +75,6 @@ export async function getMyContestTeamServer(
     .eq('owner_id', user.id)
     .eq('contest_id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? { id: data.id as string, teamName: data.team_name as string } : null;
 }

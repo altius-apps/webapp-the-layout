@@ -89,7 +89,7 @@ async function ufaStart(): Promise<GameStart> {
     let q = anon().from('ufa_games').select('year').gt('start_timestamp', nowIso).not('week', 'is', null);
     if (afterSeason != null) q = q.gt('year', afterSeason);
     const { data: next, error } = await q.order('start_timestamp', { ascending: true }).limit(1).maybeSingle();
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     if (!next) return UNSCHEDULED;
     const season = next.year as number;
 
@@ -99,7 +99,7 @@ async function ufaStart(): Promise<GameStart> {
       .select('week, start_timestamp')
       .eq('year', season)
       .not('week', 'is', null);
-    if (gamesError) throw gamesError;
+    if (gamesError) throw new Error(gamesError.message);
     const lockByWeek = new Map<string, number>();
     for (const g of (games ?? []) as { week: string; start_timestamp: string }[]) {
       if (g.week.trim() === '') continue;
@@ -133,7 +133,7 @@ async function leagueStart(table: 'pul_games' | 'wul_games'): Promise<GameStart>
     .order('game_date', { ascending: true })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   if (!data) return UNSCHEDULED;
   const season = data.season as number;
   return {

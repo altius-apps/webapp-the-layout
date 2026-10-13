@@ -2,9 +2,9 @@
 
 // The sheet's panels that don't depend on the draft type, shared by the snake
 // and the auction room: Team (one team's picks; the draft order in the lobby),
-// Chat, and the notices that stand in for Players / Queue before the draft is
-// live, after it ends, and for signed-out viewers. Players and Queue differ by
-// room type and are passed in by the room.
+// Chat, and the notices that stand in for Queue before the draft is live, for
+// Players / Queue after it ends, and for signed-out viewers. Players and Queue
+// differ by room type and are passed in by the room.
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -58,7 +58,8 @@ export function RoomPanel({
   tab: RoomTab;
   /** The sheet is at `min`: nothing in it is on screen. */
   collapsed: boolean;
-  /** The room type's Players and Queue panels, shown only while the draft is live. */
+  /** The room type's Players and Queue panels. Players also shows in the lobby
+   *  (a browse-only list); Queue only while the draft is live. */
   players: React.ReactNode;
   queue: React.ReactNode;
 }) {
@@ -66,7 +67,7 @@ export function RoomPanel({
     case 'players':
     case 'queue': {
       if (draft.status === 'scheduled') {
-        return <Notice>The player list and your queue open when the draft goes live.</Notice>;
+        return tab === 'players' ? players : <Notice>Your queue opens when the draft goes live.</Notice>;
       }
       if (draft.status === 'complete') {
         return <Notice>The draft is complete, so the player list and queue are closed.</Notice>;

@@ -30,7 +30,7 @@ export function projectionKey(playerLeague: string, playerId: string): string {
 
 export async function getProjections(contestId: string): Promise<ProjectionMap> {
   const { data, error } = await client().rpc('fantasy_player_projections', { p_contest: contestId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   const out: ProjectionMap = new Map();
   for (const r of (data ?? []) as Record<string, unknown>[]) {
     const p: PlayerProjection = {

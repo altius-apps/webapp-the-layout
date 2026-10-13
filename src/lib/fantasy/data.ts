@@ -91,7 +91,7 @@ export async function getTeamRoster(teamId: string, week: string): Promise<Roste
     .select('player_id, role, ufa_players:player_id (full_name, current_team_id, ufa_teams:current_team_id (name, full_name))')
     .eq('team_id', teamId)
     .eq('week', week);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   return (data ?? []).map((r: Record<string, unknown>) => {
     const p = r.ufa_players as
@@ -223,7 +223,7 @@ export async function setMyUsername(username: string): Promise<void> {
   if (error) {
     // 23505 = unique_violation (handle taken)
     if ((error as { code?: string }).code === '23505') throw new Error('That handle is taken.');
-    throw error;
+    throw new Error(error.message);
   }
 }
 
@@ -243,7 +243,7 @@ export async function setDisplayName(name: string): Promise<void> {
   const bad = moderateName(n, 'Display name');
   if (bad) throw new Error(bad);
   const { error } = await supabase.from('profiles').update({ display_name: n }).eq('id', user.id);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /**
@@ -282,7 +282,7 @@ export async function setAvatarUrl(url: string | null): Promise<void> {
   const patch: Record<string, string | null> = { avatar_url: url };
   if (url !== null) patch.avatar_icon = null;
   const { error } = await supabase.from('profiles').update(patch).eq('id', user.id);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   // Best-effort cleanup of the OLD object (only when it actually changed and
   // was one of ours). Storage RLS still scopes deletion to the user's folder,
@@ -336,7 +336,7 @@ export async function setAvatarIcon(ref: string | null): Promise<void> {
   const patch: Record<string, string | null> =
     ref !== null ? { avatar_icon: ref, avatar_url: null } : { avatar_icon: null };
   const { error } = await supabase.from('profiles').update(patch).eq('id', user.id);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   if (ref !== null && prevUrl) {
     const m = prevUrl.match(/\/storage\/v1\/object\/public\/avatars\/(.+)$/);
@@ -364,7 +364,7 @@ export async function playerSeasonPreview(
     .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(year)')
     .eq('player_id', playerId)
     .eq('ufa_games.year', year);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   let total = 0;
   for (const row of data ?? []) {

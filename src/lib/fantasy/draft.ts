@@ -53,13 +53,13 @@ function likeWords(needle: string): string {
  *  prefix rows first: an alphabetical LIMIT can otherwise cut every name that
  *  starts with a short query (UFA "Ma" ends at "Lochlan Margison"). */
 async function prefixFirst(
-  run: (pattern: string) => PromiseLike<{ data: Record<string, unknown>[] | null; error: unknown }>,
+  run: (pattern: string) => PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>,
   needle: string,
 ): Promise<Record<string, unknown>[]> {
   const body = likeWords(needle);
   const [prefix, sub] = await Promise.all([run(`${body}%`), run(`%${body}%`)]);
-  if (prefix.error) throw prefix.error;
-  if (sub.error) throw sub.error;
+  if (prefix.error) throw new Error(prefix.error.message);
+  if (sub.error) throw new Error(sub.error.message);
   return [...(prefix.data ?? []), ...(sub.data ?? [])];
 }
 
@@ -113,7 +113,7 @@ async function poolFirstSeason(table: 'pul_players' | 'wul_players', seasonYear:
     .order('season', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data?.season as number | undefined) ?? seasonYear;
 }
 
@@ -215,7 +215,7 @@ export async function searchContestPlayers(
       .ilike('usau_players.display_name', `%${likeWords(needle)}%`);
     if (division !== 'all') rosterQuery = rosterQuery.eq('usau_teams.gender_division', USAU_GENDER_DIVISION[division]);
     const { data, error } = await rosterQuery.limit(1000);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     const hits = (data ?? []).map((raw: Record<string, unknown>) => {
       const p = raw.usau_players as { display_name?: string } | null;
       const t = raw.usau_teams as { name?: string } | null;
@@ -270,7 +270,7 @@ export async function getContestTeamRoster(
     .select('player_id, player_league, role')
     .eq('team_id', teamId)
     .eq('week', period);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   const slots = (data ?? []).map((r: Record<string, unknown>) => ({
     playerId: r.player_id as string,
     playerLeague: r.player_league as FantasyPlayerLeague,
@@ -427,7 +427,7 @@ export async function saveContestRoster(
     .delete()
     .eq('team_id', teamId)
     .eq('week', period);
-  if (del.error) throw del.error;
+  if (del.error) throw new Error(del.error.message);
 
   const league = contest.competitionDef.playerLeague;
   const rows = slots.map((x) => ({
@@ -438,7 +438,7 @@ export async function saveContestRoster(
     role: x.role,
   }));
   const ins = await supabase.from('fantasy_roster_slots').insert(rows);
-  if (ins.error) throw ins.error;
+  if (ins.error) throw new Error(ins.error.message);
 }
 
 // ─── Draft preview (weekly-stats leagues only) ───────────────────────────────
@@ -461,7 +461,7 @@ export async function previewContestPlayerPoints(
       .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(year)')
       .eq('player_id', playerId)
       .eq('ufa_games.year', contest.seasonYear);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     let total = 0;
     for (const raw of data ?? []) {
       const r = raw as unknown as Record<string, number>;
@@ -488,7 +488,7 @@ export async function previewContestPlayerPoints(
       .select(cols)
       .eq('season', contest.seasonYear)
       .eq('player_name', playerId);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     let total = 0;
     for (const raw of data ?? []) {
       const r = raw as unknown as Record<string, number | null>;

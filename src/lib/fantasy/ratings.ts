@@ -111,7 +111,7 @@ export async function getContestRatings(contest: ContestView): Promise<PlayerRat
       .eq('player_league', contest.competitionDef.playerLeague);
     if (inDivision) query = query.eq('division', division);
     const { data, error } = await query.order(inDivision ? 'division_rank' : 'rank').range(from, from + PAGE - 1);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     const rows = (data ?? []) as Record<string, unknown>[];
     for (const r of rows) out.push(mapRating(r, inDivision));
     if (rows.length < PAGE) return out;

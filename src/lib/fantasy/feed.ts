@@ -94,7 +94,7 @@ export async function getLeagueActivity(leagueId: string, limit = 50): Promise<A
     .eq('league_id', leagueId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapActivity);
 }
 
@@ -106,7 +106,7 @@ export async function getLeagueMessages(leagueId: string, limit = 100): Promise<
     .eq('league_id', leagueId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapMessage);
 }
 
@@ -128,14 +128,14 @@ export async function sendLeagueMessage(leagueId: string, body: string): Promise
     .insert({ league_id: leagueId, user_id: user.id, body: text })
     .select('*')
     .single();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapMessage(data as Record<string, unknown>);
 }
 
 /** Author or commissioner (RLS decides; a silent no-op otherwise). */
 export async function deleteLeagueMessage(id: number): Promise<void> {
   const { error } = await sessionClient().from('fantasy_league_messages').delete().eq('id', id);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Merge activity + messages into one newest-first timeline. */

@@ -19,16 +19,18 @@
 //
 // Gate (before any room renders — mirrors mobile DraftRoom.tsx):
 //   No draft row → "No draft scheduled yet" (+ commissioner settings link).
-//   scheduled AND >4h out → countdown card, no room.
 //   Otherwise → dispatch by draft.status + draft.draftType, all inside the same
 //     frame on the app's light/dark tokens (the auction room renders in it too).
+//     The lobby is open any time before the draft, so a member can leave and
+//     re-join (Hunter, 2026-10-13; it used to open 4h before).
 //
 // State machine (draft.status, from the contract):
-//   scheduled → lobby: countdown to scheduledAt (or "starts whenever"),
-//     readiness warning strip, commissioner Start Now (replaced by "Drafts open
-//     <date>" until the server's window opens); snake also previews the empty
-//     draft board. Players and Queue stay closed until the room goes live; Team
-//     shows the draft order.
+//   scheduled → lobby: countdown to scheduledAt ("starts whenever" only for a
+//     draft scheduled before manual start was removed), readiness warning strip,
+//     commissioner Start Now (replaced by "Drafts open <date>" until the server's
+//     window opens); snake also previews the empty draft board. Players lists
+//     the pool to browse (no Draft or queue buttons), Queue stays closed until
+//     the room goes live, and Team shows the draft order.
 //   live → the room: snake (clock strip, the draft board, the sheet) or auction
 //     (nominate/bid stage, budgets on the board, the sheet).
 //   complete → summary: the board and each team's haul in the Team tab (+
@@ -128,19 +130,8 @@ interface Props {
   basePath: string;
 }
 
-const ROOM_OPENS_BEFORE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const RATINGS_REFRESH_MS = 5 * 60 * 1000;
 const FRESH_PICK_MS = 4000; // how long the "pick is in" banner and slam stay up
-
-function formatDraftTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
 
 function formatDraftDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -526,21 +517,6 @@ export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
     );
   }
 
-  // ── Gate: room opens 4h before scheduledAt ───────────────────────────────
-  const opensSoon =
-    draft.status === 'scheduled' &&
-    draft.scheduledAt != null &&
-    new Date(draft.scheduledAt).getTime() - Date.now() > ROOM_OPENS_BEFORE_MS;
-
-  if (opensSoon && draft.scheduledAt) {
-    return frame(
-      'Room opens soon',
-      <RoomGate>
-        <RoomOpensSoonCard scheduledAt={draft.scheduledAt} />
-      </RoomGate>,
-    );
-  }
-
   const teamCount = draft.draftOrder.length;
   const snake = draft.draftType === 'snake';
   const panelCtx: RoomPanelContext = {
@@ -557,6 +533,31 @@ export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
   };
   const noPlayerPanels = (t: RoomTab, collapsed: boolean) => (
     <RoomPanel {...panelCtx} tab={t} collapsed={collapsed} players={null} queue={null} />
+  );
+  // The lobby's Players tab lists the pool to browse before anyone can pick (Hunter, 2026-10-13).
+  const lobbyPanels = (t: RoomTab, collapsed: boolean) => (
+    <RoomPanel
+      {...panelCtx}
+      tab={t}
+      collapsed={collapsed}
+      players={
+        <PlayersPanel
+          contest={contest}
+          draft={draft}
+          draftedByKey={draftedByKey}
+          teamById={teamById}
+          myTeam={myTeam}
+          isMyClock={false}
+          queue={queue}
+          setQueue={setQueue}
+          ratings={ratings}
+          onRequireAuth={panelCtx.onRequireAuth}
+          refetch={refetch}
+          browseOnly
+        />
+      }
+      queue={null}
+    />
   );
   const freshTeamName = freshPick ? teamById.get(freshPick.teamId)?.teamName ?? 'Team' : '';
   const freshLabel = freshPick ? pickLabel(freshPick.overall, teamCount) : '';
@@ -589,7 +590,7 @@ export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
       )}
 
       {draft.status === 'scheduled' && (
-        <RoomStage sheet={sheet} renderPanel={noPlayerPanels}>
+        <RoomStage sheet={sheet} renderPanel={lobbyPanels}>
           {snake && teamCount > 0 ? (
             <SnakeBoard
               draft={draft}
@@ -749,25 +750,8 @@ function RoomMenu({
 /** A body that isn't a board (the auction lobby) but still scrolls clear of the sheet. */
 function RoomScroll({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-full overflow-y-auto overscroll-contain px-3 pt-3 pb-[calc(var(--sheet-peek,20rem)+1rem)] lg:px-5">
+    <div className="h-full overflow-y-auto overflow-x-hidden overscroll-contain px-3 pt-3 pb-[calc(var(--sheet-peek,20rem)+1rem)] lg:px-5">
       {children}
-    </div>
-  );
-}
-
-// ─── Gate: room opens soon ──────────────────────────────────────────────────
-
-function RoomOpensSoonCard({ scheduledAt }: { scheduledAt: string }) {
-  const countdown = useCountdown(scheduledAt);
-  return (
-    <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
-      <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-accent mb-2.5 font-tight">
-        Draft room opens 4 hours before the draft
-      </div>
-      <h2 className="font-display italic text-[28px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-2">
-        {countdown}
-      </h2>
-      <p className="text-muted font-tight text-[13px]">{formatDraftTime(scheduledAt)}</p>
     </div>
   );
 }
@@ -1223,6 +1207,7 @@ function PlayersPanel({
   ratings,
   onRequireAuth,
   refetch,
+  browseOnly = false,
 }: {
   contest: ContestView;
   draft: Draft;
@@ -1235,6 +1220,8 @@ function PlayersPanel({
   ratings: PlayerRating[];
   onRequireAuth: () => void;
   refetch: () => void;
+  /** The lobby: the list without Draft or queue buttons. */
+  browseOnly?: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FantasyPlayerHit[]>([]);
@@ -1348,7 +1335,7 @@ function PlayersPanel({
 
       {query.trim().length < 2 && !showRanked ? (
         <p className="text-faint font-tight text-[13px] py-6 text-center">
-          Search the player pool to draft or queue someone.
+          {browseOnly ? 'Search the player pool.' : 'Search the player pool to draft or queue someone.'}
         </p>
       ) : searching && !showRanked ? (
         <PlayerListSkeleton />
@@ -1367,6 +1354,7 @@ function PlayersPanel({
                 drafted={draftedTeamId !== null}
                 draftedTeamName={draftedTeamId ? teamById.get(draftedTeamId)?.teamName ?? null : null}
                 queued={queue.some((q) => q.playerId === hit.playerId && q.playerLeague === league)}
+                actions={!browseOnly}
                 canDraft={isMyClock && !!myTeam}
                 picking={pickingId === hit.playerId}
                 onDraft={() => handleDraft(hit)}
@@ -1391,6 +1379,7 @@ function PlayerRow({
   drafted,
   draftedTeamName,
   queued,
+  actions,
   canDraft,
   picking,
   onDraft,
@@ -1401,6 +1390,8 @@ function PlayerRow({
   drafted: boolean;
   draftedTeamName: string | null;
   queued: boolean;
+  /** Show the queue + Draft buttons (off in the lobby). */
+  actions: boolean;
   canDraft: boolean;
   picking: boolean;
   onDraft: () => void;
@@ -1419,7 +1410,7 @@ function PlayerRow({
           {drafted ? (draftedTeamName ? `Drafted — ${draftedTeamName}` : 'Drafted') : hit.teamName ?? ' '}
         </div>
       </div>
-      {!drafted && (
+      {!drafted && actions && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <button
             type="button"
@@ -1513,7 +1504,7 @@ function SnakeBoard({
   freshOverall?: number | null;
   /** Bump to scroll the pick on the clock into view. */
   jumpSignal?: number;
-  /** Scrolls with the board, above it (the lobby panel). */
+  /** Above the board (the lobby panel): scrolls up with it, never sideways. */
   before?: React.ReactNode;
 }) {
   const n = draft.draftOrder.length;

@@ -6,10 +6,13 @@
 // (detail line, live-bid badge, lit high bidder). The board never sees picks or
 // nominations: each room maps its own data to BoardCell states.
 //
-// It fills the room's stage and is the scroller (both axes, header sticky). The
-// bottom sheet floats over its lower part, so it keeps `--sheet-peek` of padding
-// under the last row and measures the sheet when deciding whether the pick on the
-// clock is in view.
+// It fills the room's stage and is the scroller (header sticky). The bottom sheet
+// floats over its lower part, so it keeps `--sheet-peek` of padding under the
+// last row and measures the sheet when deciding whether the pick on the clock is
+// in view. Up to FIT_COLUMNS teams share the screen width and nothing moves
+// sideways; a wider board scrolls both ways with only the board sliding, while
+// the lobby panel and legend stay pinned (Hunter, 2026-10-13: four 96px columns
+// overflowed a phone by ~33px and dragged the lobby card with them).
 //
 // Pick tiles are colored by the player's rank band, the stand-in for Sleeper's
 // position colors (frisbee has no positions in our data, and the rating tier is
@@ -148,6 +151,8 @@ export function TeamAvatar({ id, name, size = 'md' }: { id: string; name: string
 // ─── Board ──────────────────────────────────────────────────────────────────
 
 const CELL_WIDTH = 'flex-1 basis-0 min-w-[96px] lg:min-w-[104px]';
+const FIT_COLUMNS = 4;
+const FIT_CELL_WIDTH = 'flex-1 basis-0 min-w-0';
 
 export function DraftBoard({
   columns,
@@ -174,13 +179,15 @@ export function DraftBoard({
   jumpSignal?: number;
   /** Show the rank-color key (only when some pick has a rating). */
   legend?: boolean;
-  /** Scrolls with the board, above the team header (the lobby panel). */
+  /** Above the team header (the lobby panel): scrolls up with the board, never sideways. */
   before?: React.ReactNode;
   ariaLabel: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const n = columns.length;
+  const fit = n <= FIT_COLUMNS;
+  const cellWidth = fit ? FIT_CELL_WIDTH : CELL_WIDTH;
 
   const scrollToFocus = (force: boolean) => {
     const box = scrollRef.current;
@@ -220,96 +227,109 @@ export function DraftBoard({
   return (
     <div
       ref={scrollRef}
-      className="relative h-full overflow-auto overscroll-contain px-3 pb-[calc(var(--sheet-peek,20rem)+1rem)] lg:px-5"
+      className={[
+        'relative h-full overscroll-contain pb-[calc(var(--sheet-peek,20rem)+1rem)]',
+        // Wide: a size container, so the pinned strip can take its visible width
+        // (100cqw). Containment also makes it the containing block for fixed
+        // descendants, so nothing fixed (dialogs) may render inside the board.
+        fit ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto [container-type:inline-size]',
+      ].join(' ')}
     >
-      {before}
-      {n === 0 ? (
-        <div className="rounded-card-lg bg-surface p-8 text-center">
-          <p className="font-tight text-[13px] text-muted">The board fills in once the draft order is set.</p>
-        </div>
-      ) : (
-        <>
-          {legend && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-2 pt-1 font-tight text-[10.5px] text-muted">
-              <span className="font-bold tracking-[0.12em] uppercase text-faint">Rank</span>
-              {LEGEND.map((l) => (
-                <span key={l.tone} className="inline-flex items-center gap-1.5">
-                  <span aria-hidden="true" className={['w-2.5 h-2.5 rounded-full', TONE_CLASS[l.tone]].join(' ')} />
-                  {l.label}
-                </span>
-              ))}
+      <div className={fit ? undefined : 'w-max min-w-full'}>
+        {(before || (legend && n > 0)) && (
+          <div className={['px-3 lg:px-5', fit ? '' : 'sticky left-0 w-[100cqw]'].join(' ')}>
+            {before}
+            {legend && n > 0 && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-2 pt-1 font-tight text-[10.5px] text-muted">
+                <span className="font-bold tracking-[0.12em] uppercase text-faint">Rank</span>
+                {LEGEND.map((l) => (
+                  <span key={l.tone} className="inline-flex items-center gap-1.5">
+                    <span aria-hidden="true" className={['w-2.5 h-2.5 rounded-full', TONE_CLASS[l.tone]].join(' ')} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="px-3 lg:px-5">
+          {n === 0 ? (
+            <div className="rounded-card-lg bg-surface p-8 text-center">
+              <p className="font-tight text-[13px] text-muted">The board fills in once the draft order is set.</p>
+            </div>
+          ) : (
+            <div role="table" aria-label={ariaLabel} className={fit ? 'w-full' : 'w-max min-w-full'}>
+              {/* Team header — sticky over the rounds as they scroll under it. */}
+              <div ref={headerRef} role="row" className="sticky top-0 z-10 flex gap-1.5 bg-bg pb-2">
+                {columns.map((c) => {
+                  const mine = c.id === myColumnId;
+                  return (
+                    <div
+                      key={c.id}
+                      role="columnheader"
+                      className={[
+                        cellWidth,
+                        'flex flex-col items-center gap-1 rounded-card-sm px-1.5 pt-1.5 pb-1.5 transition-colors duration-200',
+                        c.lit ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : '',
+                      ].join(' ')}
+                    >
+                      {c.badge ? (
+                        <span
+                          className={[
+                            'inline-flex items-center justify-center min-w-8 h-8 lg:min-w-9 lg:h-9 px-1.5 rounded-full',
+                            'font-tight text-[11px] lg:text-[12px] font-extrabold tabular',
+                            c.lit ? 'bg-accent text-accent-ink' : 'bg-ink/15 text-ink',
+                          ].join(' ')}
+                        >
+                          {c.badge}
+                        </span>
+                      ) : (
+                        <TeamAvatar id={c.id} name={c.name} />
+                      )}
+                      <span className="flex items-center gap-1 max-w-full min-w-0">
+                        <span
+                          className={[
+                            'font-tight text-[11px] lg:text-[12px] truncate',
+                            mine ? 'font-extrabold text-ink' : 'font-semibold text-muted',
+                          ].join(' ')}
+                        >
+                          {c.name}
+                        </span>
+                        {c.auto && <AutoBadge />}
+                      </span>
+                      {c.detail && <div className="w-full font-tight text-[10.5px] text-muted tabular">{c.detail}</div>}
+                      {mine && <span aria-hidden="true" className="h-[3px] w-6 rounded-full bg-accent" />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                {Array.from({ length: rows }, (_, row) => (
+                  <div key={row} role="row" className="flex gap-1.5">
+                    {columns.map((c, col) => {
+                      const turn = arrows && row < rows - 1 && (row % 2 === 0 ? col === n - 1 : col === 0);
+                      const dir: ArrowDir | null = !arrows ? null : turn ? 'down' : row % 2 === 0 ? 'right' : 'left';
+                      return (
+                        <Cell
+                          key={c.id}
+                          dataCell={`${row}:${col}`}
+                          cell={cellAt(row, col)}
+                          width={cellWidth}
+                          teamName={c.name}
+                          mine={c.id === myColumnId}
+                          dir={dir}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-
-          <div role="table" aria-label={ariaLabel} className="w-max min-w-full">
-            {/* Team header — sticky over the rounds as they scroll under it. */}
-            <div ref={headerRef} role="row" className="sticky top-0 z-10 flex gap-1.5 bg-bg pb-2">
-              {columns.map((c) => {
-                const mine = c.id === myColumnId;
-                return (
-                  <div
-                    key={c.id}
-                    role="columnheader"
-                    className={[
-                      CELL_WIDTH,
-                      'flex flex-col items-center gap-1 rounded-card-sm px-1.5 pt-1.5 pb-1.5 transition-colors duration-200',
-                      c.lit ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : '',
-                    ].join(' ')}
-                  >
-                    {c.badge ? (
-                      <span
-                        className={[
-                          'inline-flex items-center justify-center min-w-8 h-8 lg:min-w-9 lg:h-9 px-1.5 rounded-full',
-                          'font-tight text-[11px] lg:text-[12px] font-extrabold tabular',
-                          c.lit ? 'bg-accent text-accent-ink' : 'bg-ink/15 text-ink',
-                        ].join(' ')}
-                      >
-                        {c.badge}
-                      </span>
-                    ) : (
-                      <TeamAvatar id={c.id} name={c.name} />
-                    )}
-                    <span className="flex items-center gap-1 max-w-full min-w-0">
-                      <span
-                        className={[
-                          'font-tight text-[11px] lg:text-[12px] truncate',
-                          mine ? 'font-extrabold text-ink' : 'font-semibold text-muted',
-                        ].join(' ')}
-                      >
-                        {c.name}
-                      </span>
-                      {c.auto && <AutoBadge />}
-                    </span>
-                    {c.detail && <div className="w-full font-tight text-[10.5px] text-muted tabular">{c.detail}</div>}
-                    {mine && <span aria-hidden="true" className="h-[3px] w-6 rounded-full bg-accent" />}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              {Array.from({ length: rows }, (_, row) => (
-                <div key={row} role="row" className="flex gap-1.5">
-                  {columns.map((c, col) => {
-                    const turn = arrows && row < rows - 1 && (row % 2 === 0 ? col === n - 1 : col === 0);
-                    const dir: ArrowDir | null = !arrows ? null : turn ? 'down' : row % 2 === 0 ? 'right' : 'left';
-                    return (
-                      <Cell
-                        key={c.id}
-                        dataCell={`${row}:${col}`}
-                        cell={cellAt(row, col)}
-                        teamName={c.name}
-                        mine={c.id === myColumnId}
-                        dir={dir}
-                      />
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -321,17 +341,20 @@ type ArrowDir = 'right' | 'left' | 'down';
 function Cell({
   cell,
   dataCell,
+  width,
   teamName,
   mine,
   dir,
 }: {
   cell: BoardCell;
   dataCell: string;
+  /** The column width classes (fit or scroll), shared with the header. */
+  width: string;
   teamName: string;
   mine: boolean;
   dir: ArrowDir | null;
 }) {
-  const base = [CELL_WIDTH, 'relative h-[72px] rounded-[10px] px-2 pt-1.5 pb-1 flex flex-col overflow-hidden'].join(' ');
+  const base = [width, 'relative h-[72px] rounded-[10px] px-2 pt-1.5 pb-1 flex flex-col overflow-hidden'].join(' ');
 
   if (cell.kind === 'pick') {
     const { first, last } = splitName(cell.playerName);

@@ -279,7 +279,7 @@ export async function getDraft(contestId: string): Promise<Draft | null> {
     .select('*')
     .eq('contest_id', contestId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return data ? mapDraft(data as Record<string, unknown>) : null;
 }
 
@@ -291,14 +291,16 @@ export async function getDraftPicks(draftId: string): Promise<DraftPick[]> {
     .select('*')
     .eq('draft_id', draftId)
     .order('overall', { ascending: true });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapPick);
 }
 
 /** Commissioner: create/schedule the contest's draft. */
 export async function scheduleDraft(input: {
   contestId: string;
-  at: string | null; // ISO; null = "manual start whenever"
+  // ISO. The RPC still takes null (manual start) for shipped clients; the apps
+  // dropped that option (Hunter, 2026-10-13).
+  at: string;
   rounds?: number;
 }): Promise<Draft> {
   const supabase = client();
@@ -308,7 +310,7 @@ export async function scheduleDraft(input: {
     p_pick_seconds: DRAFT_CLOCK_SECONDS,
     p_rounds: input.rounds ?? 12,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapDraft(data as Record<string, unknown>);
 }
 
@@ -316,7 +318,7 @@ export async function scheduleDraft(input: {
 export async function startDraft(draftId: string): Promise<Draft> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_start_draft', { p_draft: draftId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapDraft(data as Record<string, unknown>);
 }
 
@@ -329,7 +331,7 @@ export async function makeDraftPick(draftId: string, player: DraftRef): Promise<
     p_player_id: player.playerId,
     p_player_name: player.playerName,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapPick(data as Record<string, unknown>);
 }
 
@@ -338,7 +340,7 @@ export async function makeDraftPick(draftId: string, player: DraftRef): Promise<
 export async function resolveDraftClock(draftId: string): Promise<number> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_resolve_clock', { p_draft: draftId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data as number) ?? 0;
 }
 
@@ -349,7 +351,7 @@ export async function saveDraftQueue(draftId: string, entries: DraftRef[]): Prom
     p_draft: draftId,
     p_entries: entries,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
 
 /** Teams in the contest on autodraft: picked for (or nominate) the moment
@@ -360,7 +362,7 @@ export async function getAutodraftTeamIds(contestId: string): Promise<Set<string
     .select('id')
     .eq('contest_id', contestId)
     .eq('autodraft', true);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
 }
 
@@ -368,7 +370,7 @@ export async function getAutodraftTeamIds(contestId: string): Promise<Set<string
  *  is on the clock picks (or nominates) right away. */
 export async function setAutodraft(draftId: string, on: boolean): Promise<boolean> {
   const { data, error } = await client().rpc('fantasy_set_autodraft', { p_draft: draftId, p_on: on });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return Boolean(data);
 }
 
@@ -380,7 +382,7 @@ export async function getMyDraftQueue(draftId: string): Promise<DraftRef[]> {
     .select('entries')
     .eq('draft_id', draftId)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data?.entries ?? []) as DraftRef[]) || [];
 }
 
@@ -393,7 +395,7 @@ export async function getMyDraftQueue(draftId: string): Promise<DraftRef[]> {
 export async function getDraftReadiness(contestId: string): Promise<DraftReadiness> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_draft_readiness', { p_contest: contestId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown>;
   return mapReadiness(row);
 }
@@ -403,7 +405,7 @@ export async function getDraftReadiness(contestId: string): Promise<DraftReadine
 export async function rescheduleDraft(draftId: string, at: string): Promise<Draft> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_reschedule_draft', { p_draft: draftId, p_at: at });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapDraft(data as Record<string, unknown>);
 }
 
@@ -412,7 +414,7 @@ export async function rescheduleDraft(draftId: string, at: string): Promise<Draf
 /** Commissioner: create/schedule an AUCTION draft for the contest. */
 export async function scheduleAuctionDraft(input: {
   contestId: string;
-  at: string | null;
+  at: string; // ISO, as scheduleDraft
   rounds?: number;
   budget?: number;
   bidSeconds?: number;
@@ -428,7 +430,7 @@ export async function scheduleAuctionDraft(input: {
     p_bid_seconds: input.bidSeconds ?? 15,
     p_min_bid: input.minBid ?? 1,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapDraft(data as Record<string, unknown>);
 }
 
@@ -439,7 +441,7 @@ export async function setDraftPrices(draftId: string, prices: DraftPrice[]): Pro
     p_draft: draftId,
     p_prices: prices.map((p) => ({ playerLeague: p.playerLeague, playerId: p.playerId, price: p.price })),
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data as number) ?? 0;
 }
 
@@ -450,7 +452,7 @@ export async function getDraftPrices(draftId: string): Promise<DraftPrice[]> {
     .from('fantasy_draft_prices')
     .select('player_league, player_id, price')
     .eq('draft_id', draftId);
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     playerLeague: r.player_league as string,
     playerId: r.player_id as string,
@@ -469,7 +471,7 @@ export async function nominatePlayer(draftId: string, player: DraftRef, opening?
     p_player_name: player.playerName,
     p_opening: opening ?? null,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapNomination(data as Record<string, unknown>);
 }
 
@@ -477,7 +479,7 @@ export async function nominatePlayer(draftId: string, player: DraftRef, opening?
 export async function placeBid(draftId: string, amount: number): Promise<DraftNomination> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_bid', { p_draft: draftId, p_amount: amount });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return mapNomination(data as Record<string, unknown>);
 }
 
@@ -487,7 +489,7 @@ export async function placeBid(draftId: string, amount: number): Promise<DraftNo
 export async function resolveAuction(draftId: string): Promise<number> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_resolve_auction', { p_draft: draftId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return (data as number) ?? 0;
 }
 
@@ -495,7 +497,7 @@ export async function resolveAuction(draftId: string): Promise<number> {
 export async function getOpenNomination(draftId: string): Promise<DraftNomination | null> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_get_open_nomination', { p_draft: draftId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   if (!data) return null;
   const row = data as Record<string, unknown>;
   if (!row.id) return null;
@@ -511,7 +513,7 @@ export async function getNominations(draftId: string): Promise<DraftNomination[]
     .select('*')
     .eq('draft_id', draftId)
     .order('overall', { ascending: false });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapNomination);
 }
 
@@ -519,7 +521,7 @@ export async function getNominations(draftId: string): Promise<DraftNomination[]
 export async function getNominationBids(nominationId: string): Promise<DraftBid[]> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_get_nomination_bids', { p_nomination: nominationId });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map(mapBid);
 }
 
