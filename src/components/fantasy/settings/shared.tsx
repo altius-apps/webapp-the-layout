@@ -153,21 +153,3 @@ export function ToggleSwitch({
     </button>
   );
 }
-
-/** ISO string ↔ the local `YYYY-MM-DDTHH:mm` format <input type="datetime-local">
- *  needs. Web deviation from mobile's two-PillSelect composite date/time
- *  picker — native datetime-local exists on web, RN has no equivalent. */
-export function isoToLocalInput(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-export function localInputToIso(local: string): string | null {
-  if (!local) return null;
-  const d = new Date(local);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}

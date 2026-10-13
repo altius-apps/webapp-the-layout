@@ -22,6 +22,39 @@ import type { ContestView } from '@/lib/fantasy/leagues';
 
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
+// Last-seen card per contest, so switching tabs or reloading paints the card at
+// once while it re-fetches in the background; a status change (scheduled →
+// live → complete) swaps in and is cached (Hunter, 2026-10-12). The module map
+// covers in-app navigation; localStorage covers a reload.
+type CardState = {
+  userId: string;
+  readiness: DraftReadiness | null;
+  draft: Draft | null;
+  isCommissioner: boolean;
+};
+const CACHE_PREFIX = 'the-layout.fantasy-draft-card:';
+const memoryCache = new Map<string, CardState>();
+
+function readCache(contestId: string): CardState | null {
+  const hit = memoryCache.get(contestId);
+  if (hit) return hit;
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + contestId);
+    return raw ? (JSON.parse(raw) as CardState) : null;
+  } catch {
+    return null; // storage unavailable (private mode) or corrupt — fetch as before
+  }
+}
+
+function writeCache(contestId: string, state: CardState): void {
+  memoryCache.set(contestId, state);
+  try {
+    localStorage.setItem(CACHE_PREFIX + contestId, JSON.stringify(state));
+  } catch {
+    // storage unavailable — the in-memory copy still covers tab switches
+  }
+}
+
 function formatScheduled(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return 'Draft scheduled';
@@ -31,7 +64,6 @@ function formatScheduled(iso: string): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-    timeZone: 'America/New_York',
   });
 }
 
@@ -56,49 +88,72 @@ function useNow(intervalMs: number): number {
   return now;
 }
 
-export function DraftCard({ contest, leagueId }: { contest: ContestView; leagueId: string }) {
-  const { user } = useAuth();
-  const [readiness, setReadiness] = useState<DraftReadiness | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [isCommissioner, setIsCommissioner] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+export interface DraftCardData {
+  /** Auth still resolving: the cached card (if any) shows meanwhile. */
+  authLoading: boolean;
+  userId: string | null;
+  /** The card to render, or null until the first read lands. */
+  shown: CardState | null;
+}
+
+/** The card's data, read once by its page so the page can also place the card
+ *  and react to the draft's status (LeagueView moves it to the bottom after the
+ *  draft and drops the invite card). */
+export function useDraftCardData(contest: ContestView, leagueId: string): DraftCardData {
+  const { user, loading } = useAuth();
+  // Keyed on the id, not the user object: that object is rebuilt when the
+  // profile loads and on every token refresh, which re-ran the fetch.
+  const userId = user?.id ?? null;
+  // In-app navigation has the module map filled, so the first render already
+  // has the card. A reload starts empty (matching the server render) and fills
+  // from localStorage in the effect below.
+  const [card, setCard] = useState<CardState | null>(() => memoryCache.get(contest.id) ?? null);
 
   useEffect(() => {
-    if (!user) {
-      setReadiness(null);
-      setDraft(null);
-      setLoaded(true);
-      return;
-    }
+    setCard(readCache(contest.id));
+  }, [contest.id]);
+
+  useEffect(() => {
+    if (loading || !userId) return;
     let cancelled = false;
-    setLoaded(false);
     Promise.all([
       getDraftReadiness(contest.id).catch(() => null),
       getDraft(contest.id).catch(() => null),
       getMyLeagueRole(leagueId).catch(() => null),
     ]).then(([r, d, role]) => {
       if (cancelled) return;
-      setReadiness(r);
-      setDraft(d);
-      setIsCommissioner(role === 'commissioner');
-      setLoaded(true);
+      const next: CardState = { userId, readiness: r, draft: d, isCommissioner: role === 'commissioner' };
+      setCard(next);
+      writeCache(contest.id, next);
     });
     return () => {
       cancelled = true;
     };
-  }, [user, contest.id, leagueId]);
+  }, [loading, userId, contest.id, leagueId]);
+
+  // While auth resolves, show the cached card; once it has, only that user's.
+  const shown = card && (loading || card.userId === userId) ? card : null;
+  return { authLoading: loading, userId, shown };
+}
+
+export function DraftCard({ contest, data }: { contest: ContestView; data: DraftCardData }) {
+  const { authLoading, userId, shown } = data;
+  const readiness = shown?.readiness ?? null;
+  const draft = shown?.draft ?? null;
+  const isCommissioner = shown?.isCommissioner ?? false;
 
   const ticking = draft?.status === 'scheduled' && !!draft.scheduledAt;
   const now = useNow(ticking ? 1000 : 60_000);
 
-  if (!loaded) {
+  if (!authLoading && !userId) return null; // signed out
+  if (!shown) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-6">
         <div className="h-11 w-48 rounded-card-sm bg-ink/[0.06] animate-pulse" />
       </div>
     );
   }
-  if (!readiness) return null; // signed out
+  if (!readiness) return null; // readiness fetch failed
   // Finished contest (fantasy_rebuild_all_periods marks it complete): nothing
   // left to set up or wait for — only a completed draft keeps its results link.
   if (contest.status === 'complete' && draft?.status !== 'complete') return null;

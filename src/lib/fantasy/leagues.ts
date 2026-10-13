@@ -657,7 +657,7 @@ export async function resolveEventForCompetition(
  *  team is fixed by the game (teamSize, Hunter 2026-10-07), so the defaults
  *  already in defaultSettings stand. */
 export interface ContestSetup {
-  /** 4–16, or Infinity for no cap (stored like Settings → Teams' ∞). */
+  /** 2–16, or Infinity for no cap (stored like Settings → Teams' ∞). */
   maxTeams?: number;
   draftType?: 'snake' | 'auction';
   /** USAU Nationals only: which division the draft pool is. 'all' (or absent)
@@ -866,7 +866,7 @@ export async function renameContestTeam(teamId: string, teamName: string): Promi
 
 // ─── League limits, logo, format (commissioner-only RPCs) ────────────────────
 
-/** Team cap for a contest (commissioner-only), 4–16 or unlimited for any
+/** Team cap for a contest (commissioner-only), 2–16 or unlimited for any
  *  competition. p_max_teams is range-checked even when unlimited, so pass a real number. */
 export async function setContestLimits(contestId: string, maxTeams: number, unlimited?: boolean): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_set_contest_limits', {
@@ -898,7 +898,7 @@ export async function setContestFormat(contestId: string, format: 'h2h' | 'point
   if (error) throw error;
 }
 
-/** Generate the H2H schedule for a contest (needs >=4 teams, >=3 future
+/** Generate the H2H schedule for a contest (needs >=2 teams, >=3 future
  *  periods). Commissioner-only; usually triggered automatically on draft
  *  completion, but exposed for manual/no-draft leagues too. */
 export async function generateSchedule(contestId: string): Promise<number> {

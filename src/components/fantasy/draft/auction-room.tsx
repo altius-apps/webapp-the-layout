@@ -8,7 +8,10 @@
 // a stage with the live bid, a ladder of who bid what, and the bid stepper;
 // below it the shared DraftBoard, whose team headers double as the budget
 // strip (max bid, money left, live-bid badge, high bidder lit). Renders inside
-// DraftRoom's navy .draft-theme arena.
+// DraftRoom's frame (RoomFrame): the stage is pinned under the top bar, the
+// board fills the rest and the shared bottom sheet (Players / Queue / Team /
+// Chat) floats over it — it drops to its tab bar when a player goes on the
+// block, so the stage and the bid stepper stay in view.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -47,19 +50,13 @@ import {
 import { AutoBadge } from './autodraft';
 import { DraftBoard, TeamAvatar, formatClock, toneForRank, type BoardColumn, type BoardCell } from './draft-board';
 import { NominateSheet } from './nominate-sheet';
-import { RoomTabs } from './room-tabs';
+import { RoomPanel, type RoomPanelContext } from './room-panels';
+import { RoomStage, SheetClock, type SheetControl } from './room-sheet';
 
 interface TeamInfo {
   id: string;
   teamName: string;
 }
-
-type RoomTab = 'players' | 'queue' | 'results';
-const ROOM_TABS: readonly { id: RoomTab; label: string }[] = [
-  { id: 'players', label: 'Players' },
-  { id: 'queue', label: 'Queue' },
-  { id: 'results', label: 'Results' },
-];
 
 const SOLD_MS = 4000; // how long the SOLD stamp stays on the stage
 
@@ -83,8 +80,9 @@ export function AuctionRoom({
   bidRemainingMs,
   nominationRemainingMs,
   autodraftTeamIds,
-  controls,
-  onRequireAuth,
+  sheet,
+  panelCtx,
+  onPickPlayer,
   refetch,
 }: {
   contest: ContestView;
@@ -102,15 +100,15 @@ export function AuctionRoom({
   nominationRemainingMs: number | null;
   /** Teams on autodraft — they nominate the moment they're up. */
   autodraftTeamIds: Set<string>;
-  /** Autodraft toggle + commissioner controls, shown under the board. */
-  controls: React.ReactNode;
-  onRequireAuth: () => void;
+  sheet: SheetControl;
+  panelCtx: RoomPanelContext;
+  /** "Pick a player": open the sheet on the Players tab. */
+  onPickPlayer: () => void;
   refetch: () => void;
 }) {
-  const [tab, setTab] = useState<RoomTab>('players');
+  const { onRequireAuth } = panelCtx;
   const [actionError, setActionError] = useState<string | null>(null);
   const [nominateSheet, setNominateSheet] = useState<FantasyPlayerHit | null>(null);
-  const panelsRef = useRef<HTMLDivElement | null>(null);
 
   const myState = myTeam ? auctionTeamState(draft, picks, myTeam.id) : null;
   const nominatingTeamId = teamToNominate(draft);
@@ -128,6 +126,11 @@ export function AuctionRoom({
   const sold = useSoldMoment(openNomination, nominations);
 
   const handleQueue = (ref: DraftRef) => {
+    // Signed out, the star would fill locally and the save would fail silently.
+    if (!myTeam) {
+      onRequireAuth();
+      return;
+    }
     if (queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague)) return;
     const next = [...queue, ref];
     setQueue(next);
@@ -169,13 +172,12 @@ export function AuctionRoom({
     }
   };
 
-  const showPlayers = () => {
-    setTab('players');
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    panelsRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-  };
-
   const wonResults = nominations.filter((n) => n.status === 'won').sort((a, b) => b.overall - a.overall);
+
+  // Display only — DraftRoom's clock timer resolves an expired nomination or bid.
+  const clockMs = openNomination ? bidRemainingMs : nominationRemainingMs;
+  const clockTotal = openNomination ? draft.bidSeconds : draft.nominationSeconds;
+  const clockSec = clockMs === null ? clockTotal : Math.max(0, Math.ceil(clockMs / 1000));
 
   const playersPanel = (
     <AuctionPlayersPanel
@@ -200,67 +202,61 @@ export function AuctionRoom({
       onRequireAuth={onRequireAuth}
     />
   );
-  const resultsPanel = <ResultsPanel wonResults={wonResults} teamById={teamById} />;
 
   return (
-    <div className="space-y-4 lg:space-y-6">
+    <>
       {/* Always mounted so the text change is announced; the stamp is the sighted copy. */}
       <p className="sr-only" aria-live="polite">
         {sold && `Sold: ${sold.playerName} to ${teamById.get(sold.highTeamId)?.teamName ?? 'Team'} for $${sold.highBid}`}
       </p>
 
-      <AuctionStage
-        draft={draft}
-        nomination={openNomination}
-        sold={sold}
-        lastSold={wonResults[0] ?? null}
-        teamById={teamById}
-        ratingMap={ratingMap}
-        bids={bids}
-        myTeam={myTeam}
-        myState={myState}
-        nominatingTeamId={nominatingTeamId}
-        isMyNominateTurn={isMyNominateTurn}
-        nominatingAuto={Boolean(nominatingTeamId && autodraftTeamIds.has(nominatingTeamId))}
-        bidRemainingMs={bidRemainingMs}
-        nominationRemainingMs={nominationRemainingMs}
-        onBid={handleBid}
-        onRequireAuth={onRequireAuth}
-        onPickPlayer={showPlayers}
-        error={openNomination ? actionError : null}
-      />
-
-      <AuctionBoard
-        draft={draft}
-        picks={picks}
-        teamById={teamById}
-        ratingMap={ratingMap}
-        myTeamId={myTeam?.id ?? null}
-        liveBidByTeam={liveBidByTeam}
-        highTeamId={openNomination?.highTeamId ?? null}
-        autodraftTeamIds={autodraftTeamIds}
-        sold={sold}
-      />
-
-      {controls}
-
-      <div ref={panelsRef} className="scroll-mt-4">
-        {/* Mobile: tabs under the board. */}
-        <div className="lg:hidden">
-          <RoomTabs tabs={ROOM_TABS} active={tab} onChange={setTab} ariaLabel="Auction room sections" />
-          {tab === 'players' && playersPanel}
-          {tab === 'queue' && queuePanel}
-          {tab === 'results' && resultsPanel}
-        </div>
-
-        {/* Desktop: players under the board (2/3), queue + results rail beside them. */}
-        <div className="hidden lg:grid grid-cols-3 gap-6">
-          <div className="col-span-2 min-w-0">{playersPanel}</div>
-          <div className="min-w-0">
-            <DesktopRail queuePanel={queuePanel} resultsPanel={resultsPanel} />
-          </div>
-        </div>
-      </div>
+      <RoomStage
+        sheet={sheet}
+        header={
+          <AuctionStage
+            draft={draft}
+            nomination={openNomination}
+            sold={sold}
+            lastSold={wonResults[0] ?? null}
+            teamById={teamById}
+            ratingMap={ratingMap}
+            bids={bids}
+            myTeam={myTeam}
+            myState={myState}
+            nominatingTeamId={nominatingTeamId}
+            isMyNominateTurn={isMyNominateTurn}
+            nominatingAuto={Boolean(nominatingTeamId && autodraftTeamIds.has(nominatingTeamId))}
+            bidRemainingMs={bidRemainingMs}
+            nominationRemainingMs={nominationRemainingMs}
+            onBid={handleBid}
+            onRequireAuth={onRequireAuth}
+            onPickPlayer={onPickPlayer}
+            error={openNomination ? actionError : null}
+          />
+        }
+        status={
+          <SheetClock
+            label={openNomination ? 'Bidding' : 'Nominating'}
+            value={formatClock(clockSec)}
+            urgent={clockSec <= 10}
+          />
+        }
+        renderPanel={(tab, collapsed) => (
+          <RoomPanel {...panelCtx} tab={tab} collapsed={collapsed} players={playersPanel} queue={queuePanel} />
+        )}
+      >
+        <AuctionBoard
+          draft={draft}
+          picks={picks}
+          teamById={teamById}
+          ratingMap={ratingMap}
+          myTeamId={myTeam?.id ?? null}
+          liveBidByTeam={liveBidByTeam}
+          highTeamId={openNomination?.highTeamId ?? null}
+          autodraftTeamIds={autodraftTeamIds}
+          sold={sold}
+        />
+      </RoomStage>
 
       {nominateSheet && (
         <NominateSheet
@@ -272,33 +268,7 @@ export function AuctionRoom({
           onConfirm={handleNominate}
         />
       )}
-    </div>
-  );
-}
-
-function DesktopRail({ queuePanel, resultsPanel }: { queuePanel: React.ReactNode; resultsPanel: React.ReactNode }) {
-  const [railTab, setRailTab] = useState<'queue' | 'results'>('queue');
-  return (
-    <div>
-      <div className="flex gap-1 mb-4 bg-ink/[0.06] rounded-full p-1">
-        {(['queue', 'results'] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setRailTab(id)}
-            aria-pressed={railTab === id}
-            className={[
-              'flex-1 px-3 py-2 min-h-[40px] rounded-full font-tight text-[11px] font-bold tracking-[0.08em] uppercase transition-colors duration-150 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              railTab === id ? 'bg-surface-hi text-ink shadow-soft' : 'text-muted hover:text-ink',
-            ].join(' ')}
-          >
-            {id}
-          </button>
-        ))}
-      </div>
-      {railTab === 'queue' ? queuePanel : resultsPanel}
-    </div>
+    </>
   );
 }
 
@@ -414,9 +384,9 @@ function AuctionStage({
   // the sale shows as the compact strip on the nominating stage instead.
   if (!nomination && sold && !isMyNominateTurn) {
     return (
-      <section aria-label="Sold" className="relative overflow-hidden rounded-card-lg bg-surface shadow-hero px-5 py-7 lg:px-8 lg:py-10">
-        <div className="flex flex-col items-center text-center gap-2">
-          <span className="font-display italic font-bold text-[56px] lg:text-[84px] leading-[0.9] tracking-[-0.03em] text-accent motion-safe:animate-slam">
+      <section aria-label="Sold" className="relative overflow-hidden rounded-b-card-lg lg:rounded-card-lg bg-surface shadow-card px-5 py-4 lg:px-8 lg:py-10">
+        <div className="flex flex-col items-center text-center gap-1.5 lg:gap-2">
+          <span className="font-display italic font-bold text-[44px] lg:text-[84px] leading-[0.9] tracking-[-0.03em] text-accent motion-safe:animate-slam">
             Sold
           </span>
           <span className="font-tight text-[18px] lg:text-[22px] font-extrabold text-ink">{sold.playerName}</span>
@@ -436,7 +406,7 @@ function AuctionStage({
       <section
         aria-label="Nominating"
         className={[
-          'relative overflow-hidden rounded-card-lg bg-surface shadow-hero px-5 py-5 lg:px-8 lg:py-7',
+          'relative overflow-hidden rounded-b-card-lg lg:rounded-card-lg bg-surface shadow-card px-4 py-3.5 lg:px-8 lg:py-7',
           isMyNominateTurn ? 'ring-2 ring-accent' : '',
         ].join(' ')}
       >
@@ -446,7 +416,7 @@ function AuctionStage({
             <span className={[EYEBROW, isMyNominateTurn ? 'text-accent' : 'text-muted'].join(' ')}>
               {isMyNominateTurn ? 'Your nomination' : 'Up to nominate'}
             </span>
-            <div className="flex items-center gap-3 mt-3 min-w-0">
+            <div className="flex items-center gap-3 mt-2 lg:mt-3 min-w-0">
               <TeamAvatar id={nominatingTeamId ?? ''} name={name} size="lg" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
@@ -469,7 +439,7 @@ function AuctionStage({
             type="button"
             onClick={onPickPlayer}
             className={[
-              'mt-5 w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 min-h-[48px] rounded-full',
+              'mt-3 lg:mt-5 w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 min-h-[48px] rounded-full',
               'bg-accent text-accent-ink font-tight text-[13px] font-extrabold tracking-[0.08em] uppercase',
               'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
@@ -480,7 +450,7 @@ function AuctionStage({
         )}
 
         {lastSold && (
-          <p className="mt-5 pt-4 border-t border-hairline font-tight text-[12.5px] text-muted truncate">
+          <p className="mt-3 pt-3 lg:mt-5 lg:pt-4 border-t border-hairline font-tight text-[12.5px] text-muted truncate">
             <span className={[EYEBROW, 'text-faint mr-2'].join(' ')}>Last sold</span>
             <span className="font-semibold text-ink">{lastSold.playerName}</span>
             {' · '}
@@ -508,58 +478,58 @@ function AuctionStage({
     <section
       aria-label={`Bidding on ${nomination.playerName}`}
       className={[
-        'relative overflow-hidden rounded-card-lg bg-surface shadow-hero px-4 pt-4 pb-5 lg:px-8 lg:pt-7 lg:pb-8',
+        'relative overflow-hidden rounded-b-card-lg lg:rounded-card-lg bg-surface shadow-card px-4 pt-3 pb-3.5 lg:px-8 lg:pt-7 lg:pb-8',
         iAmHigh ? 'ring-2 ring-accent' : '',
       ].join(' ')}
     >
       {sold && <SoldStrip sold={sold} teamName={teamName(sold.highTeamId)} />}
 
-      {/* Phones stack in DOM order. Desktop: player + controls on the left, the
-          bid in the middle, clock + ladder on the right. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto_280px] lg:gap-x-12">
-        <div className="min-w-0 flex items-start justify-between gap-4 lg:col-start-1 lg:row-start-1">
-          <div className="min-w-0">
-            <span className={[EYEBROW, 'text-accent'].join(' ')}>On the block</span>
-            <span className="font-tight text-[11.5px] text-muted ml-2">
-              nominated by {teamName(nomination.teamId)}
-            </span>
-            <div className="mt-2 font-tight text-[15px] lg:text-[18px] font-semibold text-muted leading-tight truncate">
-              {first}
-            </div>
-            <h2 className="m-0 font-display italic font-bold text-[40px] lg:text-[64px] leading-[0.9] tracking-[-0.03em] text-ink truncate">
-              {last}
-            </h2>
-            {meta.length > 0 && (
-              <div className="mt-2 font-tight text-[12px] lg:text-[13px] text-muted truncate tabular">{meta.join(' · ')}</div>
-            )}
+      {/* Phones: the player on the left; clock and bid on the right; then the
+          ladder and the controls full width. Desktop: player + controls on the
+          left, the bid in the middle, clock + ladder on the right. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_8.5rem] gap-x-3 lg:grid-cols-[minmax(0,1fr)_auto_280px] lg:gap-x-12">
+        <div className="min-w-0 col-start-1 row-start-1 row-span-2 lg:row-span-1">
+          <span className={[EYEBROW, 'text-accent'].join(' ')}>On the block</span>
+          <span className="block truncate font-tight text-[11.5px] text-muted lg:inline lg:ml-2">
+            nominated by {teamName(nomination.teamId)}
+          </span>
+          <div className="mt-1.5 lg:mt-2 font-tight text-[14px] lg:text-[18px] font-semibold text-muted leading-tight truncate">
+            {first}
           </div>
-          <div className="lg:hidden">
-            <CountdownRing remainingMs={bidRemainingMs} totalSeconds={draft.bidSeconds} />
-          </div>
+          <h2 className="m-0 font-display italic font-bold text-[34px] lg:text-[64px] leading-[0.95] lg:leading-[0.9] tracking-[-0.03em] text-ink truncate">
+            {last}
+          </h2>
+          {meta.length > 0 && (
+            <div className="mt-1.5 lg:mt-2 font-tight text-[12px] lg:text-[13px] text-muted truncate tabular">{meta.join(' · ')}</div>
+          )}
         </div>
 
-        <div className="mt-5 min-w-0 lg:mt-0 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-center lg:flex lg:flex-col lg:items-center lg:text-center">
-          <span className={[EYEBROW, 'text-muted'].join(' ')}>Current bid</span>
+        <div className="col-start-2 row-start-1 justify-self-end lg:hidden">
+          <CountdownRing remainingMs={bidRemainingMs} totalSeconds={draft.bidSeconds} />
+        </div>
+
+        <div className="col-start-2 row-start-2 min-w-0 text-right lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-center lg:flex lg:flex-col lg:items-center lg:text-center">
+          <span className={[EYEBROW, 'text-muted sr-only lg:not-sr-only'].join(' ')}>Current bid</span>
           <div
             key={nomination.highBid}
-            className="font-display italic font-bold text-[64px] lg:text-[88px] leading-[0.85] tracking-[-0.04em] text-ink tabular motion-safe:animate-pulse-once"
+            className="font-display italic font-bold text-[48px] lg:text-[88px] leading-[0.85] tracking-[-0.04em] text-ink tabular motion-safe:animate-pulse-once"
           >
             ${nomination.highBid}
           </div>
-          <div className="flex items-center gap-2 mt-2 min-w-0 lg:justify-center">
+          <div className="flex items-center justify-end gap-2 mt-1.5 min-w-0 lg:justify-center lg:mt-2">
             <TeamAvatar id={nomination.highTeamId} name={highName} size="sm" />
-            <span className="font-tight text-[14px] font-bold text-ink truncate">{highName}</span>
-            {iAmHigh && (
-              <span className="flex-shrink-0 inline-flex items-center h-6 px-2.5 rounded-full bg-accent text-accent-ink font-tight text-[10px] font-extrabold tracking-[0.14em] uppercase">
-                You&apos;re winning
-              </span>
-            )}
+            <span className="min-w-0 font-tight text-[13px] lg:text-[14px] font-bold text-ink truncate">{highName}</span>
           </div>
+          {iAmHigh && (
+            <span className="mt-1 inline-flex items-center h-6 px-2.5 rounded-full bg-accent text-accent-ink font-tight text-[10px] font-extrabold tracking-[0.14em] uppercase">
+              You&apos;re winning
+            </span>
+          )}
         </div>
 
         {/* Phones: the ladder as a strip under the bid (Sleeper style). */}
         {bids.length > 0 && (
-          <ol aria-label="Bids" className="lg:hidden mt-4 -mx-4 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
+          <ol aria-label="Bids" className="lg:hidden col-span-2 mt-3 -mx-4 px-4 flex gap-1.5 overflow-x-auto no-scrollbar">
             {[...bids].reverse().map((b, i) => (
               <li
                 key={`${b.teamId}:${b.amount}`}
@@ -576,7 +546,7 @@ function AuctionStage({
           </ol>
         )}
 
-        <div className="mt-5 lg:mt-8 min-w-0 lg:col-start-1 lg:row-start-2">
+        <div className="col-span-2 mt-3 min-w-0 lg:col-span-1 lg:col-start-1 lg:row-start-2 lg:mt-8">
           <BidControls
             key={nomination.id}
             nomination={nomination}
@@ -723,8 +693,8 @@ function BidControls({
 
   return (
     <div>
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-1.5 rounded-full bg-ink/[0.06] p-1">
+      <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-2.5">
+        <div className="flex min-w-0 flex-1 basis-[10.5rem] items-center gap-1.5 rounded-full bg-ink/[0.06] p-1 sm:flex-none sm:basis-auto">
           <button
             type="button"
             onClick={() => set(value - 1)}
@@ -784,7 +754,7 @@ function BidControls({
           onClick={submit}
           disabled={bidding}
           className={[
-            'sm:ml-auto min-h-[52px] px-7 rounded-full font-tight text-[14px] font-extrabold tracking-[0.08em] uppercase tabular',
+            'basis-full sm:basis-auto sm:ml-auto min-h-[52px] px-7 rounded-full font-tight text-[14px] font-extrabold tracking-[0.08em] uppercase tabular',
             'bg-accent text-accent-ink hover:opacity-90 transition-opacity duration-150 cursor-pointer',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
             'disabled:opacity-60 disabled:cursor-wait',
@@ -793,7 +763,7 @@ function BidControls({
           {bidding ? 'Bidding…' : `Bid $${value}`}
         </button>
       </div>
-      <p className="mt-2.5 font-tight text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted tabular">
+      <p className="mt-2 font-tight text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted tabular">
         Max <span className="text-ink">${max}</span> · ${myState.remaining} left · {myState.openSlots}{' '}
         {myState.openSlots === 1 ? 'spot' : 'spots'}
       </p>
@@ -803,7 +773,7 @@ function BidControls({
 
 /** Clock ring that drains with the time left. The SVG's dash offset is an
  *  attribute, so no inline style. ≤10s pulses: live and accent are both coral
- *  in the draft arena, so urgency can't be a color change. */
+ *  in dark mode, so urgency can't be a color change. */
 function CountdownRing({
   remainingMs,
   totalSeconds,
@@ -822,7 +792,7 @@ function CountdownRing({
     <div
       role="timer"
       aria-label={`${sec} seconds remaining`}
-      className={['relative flex-shrink-0', large ? 'w-24 h-24' : 'w-16 h-16'].join(' ')}
+      className={['relative flex-shrink-0', large ? 'w-24 h-24' : 'w-10 h-10 lg:w-16 lg:h-16'].join(' ')}
     >
       <svg viewBox="0 0 60 60" className="w-full h-full -rotate-90" aria-hidden="true">
         <circle cx="30" cy="30" r={r} fill="none" strokeWidth="4" className="stroke-ink/10" />
@@ -841,7 +811,7 @@ function CountdownRing({
       <span
         className={[
           'absolute inset-0 flex items-center justify-center font-tight font-extrabold tabular text-ink',
-          large ? 'text-[22px]' : 'text-[15px]',
+          large ? 'text-[22px]' : 'text-[11px] lg:text-[15px]',
           low ? 'motion-safe:animate-cue-pulse' : '',
         ].join(' ')}
       >
@@ -853,7 +823,7 @@ function CountdownRing({
 
 // ─── Auction board (team columns × roster spots) ────────────────────────────
 
-function AuctionBoard({
+export function AuctionBoard({
   draft,
   picks,
   teamById,
@@ -1144,38 +1114,6 @@ function QueueGlyph({ filled }: { filled: boolean }) {
         />
       )}
     </svg>
-  );
-}
-
-// ─── Results panel (won nominations, newest first) ─────────────────────────
-
-function ResultsPanel({ wonResults, teamById }: { wonResults: DraftNomination[]; teamById: Map<string, TeamInfo> }) {
-  if (wonResults.length === 0) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
-        <p className="text-muted font-tight text-[13px]">No sales yet.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-      <ul aria-label="Auction results">
-        {wonResults.map((n, idx) => (
-          <li
-            key={n.id}
-            className={['flex items-center gap-3 px-4 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="font-tight text-[13.5px] font-semibold text-ink truncate">{n.playerName}</div>
-              <div className="font-tight text-[11px] text-muted truncate">
-                {teamById.get(n.highTeamId)?.teamName ?? 'Team'}
-              </div>
-            </div>
-            <span className="font-tight text-[14px] font-bold text-accent tabular flex-shrink-0">${n.highBid}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

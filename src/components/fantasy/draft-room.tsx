@@ -7,22 +7,33 @@
 // talks to fantasy_drafts / fantasy_draft_picks / fantasy_draft_queues
 // directly.
 //
+// Layout (Sleeper-style, Hunter 2026-10-12): a full-screen surface over the page
+// under the app's top rail (RoomFrame). Slim top bar — X, status eyebrow
+// over the league name, gear (autodraft, commissioner link) — then a compact
+// header strip for the live pick clock, the board filling the screen, and a
+// bottom sheet (Players / Queue / Team / Chat) that drags up and down over it
+// (RoomStage). The league header + nav are left out of the page on this route
+// (LeagueChrome), and the bottom nav and footer aren't rendered (isDraftRoomPath).
+// The room must mount once per page: the realtime client caches channels by
+// topic, so a second copy's subscribe would cut the first one's live updates.
+//
 // Gate (before any room renders — mirrors mobile DraftRoom.tsx):
 //   No draft row → "No draft scheduled yet" (+ commissioner settings link).
 //   scheduled AND >4h out → countdown card, no room.
-//   Otherwise → dispatch by draft.status + draft.draftType, all inside one navy
-//     `.draft-theme` arena (the auction room renders in it too).
+//   Otherwise → dispatch by draft.status + draft.draftType, all inside the same
+//     frame on the app's light/dark tokens (the auction room renders in it too).
 //
 // State machine (draft.status, from the contract):
 //   scheduled → lobby: countdown to scheduledAt (or "starts whenever"),
 //     readiness warning strip, commissioner Start Now (replaced by "Drafts open
 //     <date>" until the server's window opens); snake also previews the empty
-//     draft board. No player list or queue until the room goes live.
-//   live → the room: snake (broadcast header with the pick clock, the draft
-//     board, then players/queue/picks) or auction (nominate/bid clock,
-//     players/budgets/results/queue).
-//   complete → summary: snake's full board, each team's haul (+ auction
-//     prices) + link back.
+//     draft board. Players and Queue stay closed until the room goes live; Team
+//     shows the draft order.
+//   live → the room: snake (clock strip, the draft board, the sheet) or auction
+//     (nominate/bid stage, budgets on the board, the sheet).
+//   complete → summary: the board and each team's haul in the Team tab (+
+//     auction prices). Viewers who watched it end also get a strip counting down
+//     to the league page; anyone opening it later just stays on the board.
 //
 // Clock resolution: any open client can call resolveDraftClock() /
 // resolveAuction() once a clock is CLOCK_GRACE_MS past 0 (the server's own
@@ -73,11 +84,14 @@ import { searchContestPlayers } from '@/lib/fantasy/draft';
 import { getMyContestTeam, type ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
-import { AuctionRoom } from './draft/auction-room';
-import { RoomTabs } from './draft/room-tabs';
-import { CommissionerBar } from './draft/commissioner-bar';
+import { AuctionBoard, AuctionRoom } from './draft/auction-room';
+import { RoomFrame, RoomGate } from './draft/room-frame';
+import { RoomStage, SheetClock, type SheetControl, type SheetSnap } from './draft/room-sheet';
+import { RoomPanel, type RoomPanelContext } from './draft/room-panels';
+import type { RoomTab } from './draft/room-tabs';
 import { AutoBadge, AutodraftToggle } from './draft/autodraft';
 import {
+  CrosshairIcon,
   DraftBoard,
   TeamAvatar,
   formatClock,
@@ -105,19 +119,14 @@ interface TeamInfo {
 
 interface Props {
   contest: ContestView;
+  /** The league's name, as the league header shows it. */
+  leagueName: string;
   /** Every team in this contest — needed to render names on the board/ticker
    *  and to resolve "team on the clock" to a display name. */
   teams: TeamInfo[];
   /** Where "back" / standings / team links point. */
   basePath: string;
 }
-
-type RoomTab = 'players' | 'queue' | 'picks';
-const ROOM_TABS: readonly { id: RoomTab; label: string }[] = [
-  { id: 'players', label: 'Players' },
-  { id: 'queue', label: 'Queue' },
-  { id: 'picks', label: 'Picks' },
-];
 
 const ROOM_OPENS_BEFORE_MS = 4 * 60 * 60 * 1000; // 4 hours
 const RATINGS_REFRESH_MS = 5 * 60 * 1000;
@@ -137,7 +146,7 @@ function formatDraftDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-export function DraftRoom({ contest, teams, basePath }: Props) {
+export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -152,11 +161,20 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<DraftReadiness | null>(null);
+  // Only a viewer who watched the draft end is sent back to the league; anyone
+  // who opens a finished draft stays on the board (Hunter, 2026-10-13).
+  const [sawLive, setSawLive] = useState(false);
+  useEffect(() => {
+    if (draft?.status === 'live') setSawLive(true);
+  }, [draft?.status]);
 
   const [myTeam, setMyTeam] = useState<TeamInfo | null>(null);
   const [queue, setQueue] = useState<DraftRef[]>([]);
   const [ratings, setRatings] = useState<PlayerRating[]>([]);
-  const [tab, setTab] = useState<RoomTab>('players');
+  // The sheet. Until the viewer picks a tab it follows the draft: the draft order
+  // in the lobby, the player list once live, the hauls when it's over.
+  const [pickedTab, setPickedTab] = useState<RoomTab | null>(null);
+  const [snap, setSnap] = useState<SheetSnap>('peek');
   const [isCommissioner, setIsCommissioner] = useState(false);
 
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
@@ -406,30 +424,105 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   // Snake only: an auction win isn't "a pick" (the auction room has its own moment).
   const freshPick = useFreshPick(picks, !loading && draft?.draftType === 'snake');
 
-  if (loading) return <RoomSkeleton />;
+  // With a player on the block the auction stage is what matters, so a sheet at
+  // peek drops to its tab bar when a nomination opens.
+  const nominationId = openNomination?.id ?? null;
+  const seenNomination = useRef<string | null>(null);
+  useEffect(() => {
+    if (nominationId && nominationId !== seenNomination.current) setSnap((s) => (s === 'peek' ? 'min' : s));
+    seenNomination.current = nominationId;
+  }, [nominationId]);
+
+  const signedOut = !authLoading && !user;
+  const tab: RoomTab = pickedTab ?? (draft?.status === 'live' ? 'players' : 'team');
+  const sheet: SheetControl = { tab, snap, setTab: setPickedTab, setSnap };
+  const openTab = (t: RoomTab) => {
+    setPickedTab(t);
+    setSnap((s) => (s === 'min' ? 'peek' : s));
+  };
+
+  const autodraftToggle =
+    myTeam && draft && draft.status !== 'complete' ? (
+      <AutodraftToggle
+        draftId={draft.id}
+        on={autodraftTeamIds.has(myTeam.id)}
+        onChanged={(next) => {
+          setAutodraftTeamIds((prev) => {
+            const updated = new Set(prev);
+            if (next) updated.add(myTeam.id);
+            else updated.delete(myTeam.id);
+            return updated;
+          });
+          refetch();
+        }}
+      />
+    ) : null;
+
+  // Every state wears the same frame, gates included.
+  const frame = (eyebrow: string, body: React.ReactNode) => (
+    <RoomFrame
+      eyebrow={eyebrow}
+      title={leagueName}
+      exitHref={basePath}
+      autoOn={!!myTeam && !!autodraftToggle && autodraftTeamIds.has(myTeam.id)}
+      menu={
+        <RoomMenu
+          autodraft={autodraftToggle}
+          settingsHref={isCommissioner ? `${basePath}/settings` : null}
+          signedOut={signedOut}
+          onSignIn={() => setAuthOpen(true)}
+        />
+      }
+    >
+      {body}
+      <AuthModal
+        open={authOpen}
+        dismissible
+        initialMode="signin"
+        onDismiss={() => setAuthOpen(false)}
+        headline="Sign in to draft"
+        subhead="You need a team in this league to make picks."
+      />
+    </RoomFrame>
+  );
+
+  if (loading) {
+    return frame(
+      'Draft room',
+      <div className="px-3 py-4 lg:px-5">
+        <RoomSkeleton />
+      </div>,
+    );
+  }
 
   if (loadError) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
-        <p className="text-muted font-tight text-[14px]">{loadError}</p>
-      </div>
+    return frame(
+      'Draft room',
+      <RoomGate>
+        <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+          <p className="text-muted font-tight text-[14px]">{loadError}</p>
+        </div>
+      </RoomGate>,
     );
   }
 
   // ── Gate: no draft scheduled yet ─────────────────────────────────────────
   if (!draft) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
-        <p className="text-muted font-tight text-[14px]">No draft scheduled yet.</p>
-        {isCommissioner && (
-          <Link
-            href={`${basePath}/draft/setup`}
-            className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
-          >
-            Set up the draft
-          </Link>
-        )}
-      </div>
+    return frame(
+      'No draft yet',
+      <RoomGate>
+        <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+          <p className="text-muted font-tight text-[14px]">No draft scheduled yet.</p>
+          {isCommissioner && (
+            <Link
+              href={`${basePath}/draft/setup`}
+              className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+            >
+              Set up the draft
+            </Link>
+          )}
+        </div>
+      </RoomGate>,
     );
   }
 
@@ -440,62 +533,48 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     new Date(draft.scheduledAt).getTime() - Date.now() > ROOM_OPENS_BEFORE_MS;
 
   if (opensSoon && draft.scheduledAt) {
-    return <RoomOpensSoonCard scheduledAt={draft.scheduledAt} />;
+    return frame(
+      'Room opens soon',
+      <RoomGate>
+        <RoomOpensSoonCard scheduledAt={draft.scheduledAt} />
+      </RoomGate>,
+    );
   }
 
   const teamCount = draft.draftOrder.length;
   const snake = draft.draftType === 'snake';
-
-  const autodraftToggle = myTeam ? (
-    <AutodraftToggle
-      draftId={draft.id}
-      on={autodraftTeamIds.has(myTeam.id)}
-      onChanged={(next) => {
-        setAutodraftTeamIds((prev) => {
-          const updated = new Set(prev);
-          if (next) updated.add(myTeam.id);
-          else updated.delete(myTeam.id);
-          return updated;
-        });
-        refetch();
-      }}
-    />
-  ) : null;
-  // Live: the clock and board come first; these sit between the board and the
-  // player list so they don't push the clock down on a phone.
-  const liveControls =
-    draft.status === 'live' && (myTeam || isCommissioner) ? (
-      <div className="grid gap-3 lg:grid-cols-2">
-        {autodraftToggle}
-        {isCommissioner && <CommissionerBar draft={draft} pickCount={picks.length} refetch={refetch} />}
-      </div>
-    ) : null;
-  // Snake live room only (the auction has its own "Sign in to bid"). Sits under
-  // the board so a signed-out phone viewer finds it without opening the Queue tab.
-  const signInPrompt =
-    !authLoading && !user ? (
-      <div className="bg-surface rounded-card-lg shadow-card px-4 py-3 lg:px-5 flex items-center justify-between gap-3">
-        <p className="m-0 min-w-0 font-tight text-[13px] text-muted leading-snug">Sign in to draft or build a queue.</p>
-        <button
-          type="button"
-          onClick={() => setAuthOpen(true)}
-          className={[
-            'flex-shrink-0 inline-flex items-center justify-center px-5 min-h-[44px] rounded-full',
-            'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase',
-            'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          ].join(' ')}
-        >
-          Sign in
-        </button>
-      </div>
-    ) : null;
+  const panelCtx: RoomPanelContext = {
+    contest,
+    draft,
+    teams,
+    picks,
+    ratings,
+    myTeamId: myTeam?.id ?? null,
+    basePath,
+    signedOut,
+    onRequireAuth: () => setAuthOpen(true),
+    onExpand: () => setSnap('full'),
+  };
+  const noPlayerPanels = (t: RoomTab, collapsed: boolean) => (
+    <RoomPanel {...panelCtx} tab={t} collapsed={collapsed} players={null} queue={null} />
+  );
   const freshTeamName = freshPick ? teamById.get(freshPick.teamId)?.teamName ?? 'Team' : '';
   const freshLabel = freshPick ? pickLabel(freshPick.overall, teamCount) : '';
 
-  return (
-    // Phones: edge to edge (the frame's px-5 cancelled), like an app screen.
-    <div className="draft-theme bg-bg text-ink -mx-5 px-3 py-4 lg:mx-0 lg:p-5 lg:rounded-card-lg flex flex-col gap-4 lg:gap-6">
+  const eyebrow =
+    draft.status === 'scheduled'
+      ? 'Draft lobby'
+      : draft.status === 'complete'
+        ? 'Draft complete!'
+        : snake
+          ? `Round ${roundOf(draft.currentOverall, teamCount)} · Pick ${pickLabel(draft.currentOverall, teamCount)}`
+          : openNomination
+            ? 'Bidding'
+            : 'Nominating';
+
+  return frame(
+    eyebrow,
+    <>
       {/* Always mounted so the text change is announced; the banner is the sighted copy. */}
       <p className="sr-only" aria-live="polite">
         {freshPick && `Pick ${freshLabel}: ${freshTeamName} selects ${freshPick.playerName}`}
@@ -510,29 +589,39 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       )}
 
       {draft.status === 'scheduled' && (
-        <>
-          <LobbyPanel
-            draft={draft}
-            teams={teams}
-            isCommissioner={isCommissioner}
-            readiness={readiness}
-            onStarted={refetch}
-          />
-          {snake && teamCount > 0 && (
+        <RoomStage sheet={sheet} renderPanel={noPlayerPanels}>
+          {snake && teamCount > 0 ? (
             <SnakeBoard
               draft={draft}
               picks={picks}
               teamById={teamById}
               ratings={ratings}
               myTeamId={myTeam?.id ?? null}
+              before={
+                <LobbyPanel
+                  draft={draft}
+                  teams={teams}
+                  isCommissioner={isCommissioner}
+                  readiness={readiness}
+                  onStarted={refetch}
+                />
+              }
             />
+          ) : (
+            <RoomScroll>
+              <LobbyPanel
+                draft={draft}
+                teams={teams}
+                isCommissioner={isCommissioner}
+                readiness={readiness}
+                onStarted={refetch}
+              />
+            </RoomScroll>
           )}
-        </>
+        </RoomStage>
       )}
 
-      {myTeam && draft.status === 'scheduled' && autodraftToggle}
-
-      {draft.status === 'live' && draft.draftType === 'auction' && (
+      {draft.status === 'live' && !snake && (
         <AuctionRoom
           contest={contest}
           draft={draft}
@@ -548,15 +637,15 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           bidRemainingMs={bidRemainingMs}
           nominationRemainingMs={nominationRemainingMs}
           autodraftTeamIds={autodraftTeamIds}
-          controls={liveControls}
-          onRequireAuth={() => setAuthOpen(true)}
+          sheet={sheet}
+          panelCtx={panelCtx}
+          onPickPlayer={() => openTab('players')}
           refetch={refetch}
         />
       )}
 
-      {draft.status === 'live' && draft.draftType === 'snake' && (
+      {draft.status === 'live' && snake && (
         <LiveRoom
-          contest={contest}
           draft={draft}
           picks={picks}
           teamById={teamById}
@@ -568,18 +657,19 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           setQueue={setQueue}
           ratings={ratings}
           freshOverall={freshPick?.overall ?? null}
-          controls={liveControls}
-          signInPrompt={signInPrompt}
-          tab={tab}
-          setTab={setTab}
-          onRequireAuth={() => setAuthOpen(true)}
+          sheet={sheet}
+          panelCtx={panelCtx}
           refetch={refetch}
         />
       )}
 
       {draft.status === 'complete' && (
-        <>
-          {snake && (
+        <RoomStage
+          sheet={sheet}
+          header={sawLive ? <CompleteStrip draft={draft} basePath={basePath} /> : undefined}
+          renderPanel={noPlayerPanels}
+        >
+          {snake ? (
             <SnakeBoard
               draft={draft}
               picks={picks}
@@ -588,19 +678,79 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
               myTeamId={myTeam?.id ?? null}
               freshOverall={freshPick?.overall ?? null}
             />
+          ) : (
+            <AuctionBoard
+              draft={draft}
+              picks={picks}
+              teamById={teamById}
+              ratingMap={toRatingMap(ratings)}
+              myTeamId={myTeam?.id ?? null}
+              liveBidByTeam={new Map()}
+              highTeamId={null}
+              autodraftTeamIds={autodraftTeamIds}
+              sold={null}
+            />
           )}
-          <CompletePanel draft={draft} picks={picks} teams={teams} basePath={basePath} />
-        </>
+        </RoomStage>
       )}
+    </>,
+  );
+}
 
-      <AuthModal
-        open={authOpen}
-        dismissible
-        initialMode="signin"
-        onDismiss={() => setAuthOpen(false)}
-        headline="Sign in to draft"
-        subhead="You need a team in this league to make picks."
-      />
+/** The gear popover: autodraft, the commissioner's link, or what a viewer can do. */
+function RoomMenu({
+  autodraft,
+  settingsHref,
+  signedOut,
+  onSignIn,
+}: {
+  autodraft: React.ReactNode;
+  settingsHref: string | null;
+  signedOut: boolean;
+  onSignIn: () => void;
+}) {
+  const empty = !autodraft && !settingsHref;
+  return (
+    <div className="space-y-4">
+      <p className="m-0 font-tight text-[10.5px] font-bold uppercase tracking-[0.16em] text-muted">Draft settings</p>
+      {autodraft}
+      {settingsHref && (
+        <Link
+          href={settingsHref}
+          className="flex min-h-[44px] items-center justify-between gap-3 rounded-card-sm bg-ink/[0.05] px-3.5 font-tight text-[13px] font-bold text-ink transition-colors duration-150 hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          League settings
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M4.5 2.5L8 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+      )}
+      {empty &&
+        (signedOut ? (
+          <>
+            <p className="m-0 font-tight text-[12.5px] leading-snug text-muted">
+              Sign in to draft, build a queue and set autodraft.
+            </p>
+            <button
+              type="button"
+              onClick={onSignIn}
+              className="inline-flex min-h-[44px] cursor-pointer items-center justify-center rounded-full bg-accent px-5 font-tight text-[12px] font-bold uppercase tracking-[0.08em] text-accent-ink transition-opacity duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Sign in
+            </button>
+          </>
+        ) : (
+          <p className="m-0 font-tight text-[12.5px] leading-snug text-muted">You&apos;re watching this draft.</p>
+        ))}
+    </div>
+  );
+}
+
+/** A body that isn't a board (the auction lobby) but still scrolls clear of the sheet. */
+function RoomScroll({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="h-full overflow-y-auto overscroll-contain px-3 pt-3 pb-[calc(var(--sheet-peek,20rem)+1rem)] lg:px-5">
+      {children}
     </div>
   );
 }
@@ -658,8 +808,8 @@ function PickBanner({ label, teamName, playerName }: { label: string; teamName: 
   return (
     <div
       aria-hidden="true"
-      // A toast over the room, so the board doesn't jump on every pick.
-      className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3 rounded-card bg-surface-hi shadow-hero px-4 py-3 motion-safe:animate-fade-up"
+      // A toast over the board (under the top bar), so the board doesn't jump on every pick.
+      className="absolute inset-x-3 top-3 z-50 mx-auto max-w-xl flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3 rounded-card bg-surface-hi shadow-hero px-4 py-3 motion-safe:animate-fade-up"
     >
       <span className="flex-shrink-0 font-tight text-[10.5px] font-extrabold tracking-[0.16em] uppercase text-accent">
         The pick is in
@@ -718,10 +868,7 @@ function LobbyPanel({
     readiness?.earliestAt && new Date(readiness.earliestAt).getTime() > Date.now() ? readiness.earliestAt : null;
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 text-center">
-      <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-accent mb-2 font-tight">
-        Draft lobby
-      </div>
+    <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 text-center lg:mx-auto lg:max-w-xl">
       <h2 className="font-display italic text-[28px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-3">
         {draft.scheduledAt ? countdown : 'Starts whenever the commissioner is ready'}
       </h2>
@@ -742,11 +889,11 @@ function LobbyPanel({
       )}
 
       {orderKnown && (
-        <ol className="max-w-sm mx-auto mb-6 space-y-1.5 text-left">
+        <ol className="max-w-md mx-auto mb-6 grid grid-cols-2 gap-1.5 text-left">
           {draft.draftOrder.map((teamId, idx) => (
             <li
               key={teamId}
-              className="flex items-center gap-3 px-3.5 py-2 rounded-card-sm bg-ink/[0.04]"
+              className="flex min-w-0 items-center gap-2.5 px-3 py-2 rounded-card-sm bg-ink/[0.04]"
             >
               <span className="font-tight text-[12px] font-bold text-faint tabular w-5 text-right">{idx + 1}</span>
               <span className="font-tight text-[13px] font-semibold text-ink truncate">
@@ -779,10 +926,6 @@ function LobbyPanel({
         )
       )}
       {error && <p className="mt-3 text-[12px] text-live font-tight" role="alert">{error}</p>}
-
-      <p className="mt-6 text-[11px] text-faint font-tight">
-        The player list and your queue open when the draft goes live.
-      </p>
     </div>
   );
 }
@@ -811,7 +954,6 @@ function useCountdown(iso: string | null): string {
 // ─── Live room ────────────────────────────────────────────────────────────────
 
 function LiveRoom({
-  contest,
   draft,
   picks,
   teamById,
@@ -823,14 +965,10 @@ function LiveRoom({
   setQueue,
   ratings,
   freshOverall,
-  controls,
-  signInPrompt,
-  tab,
-  setTab,
-  onRequireAuth,
+  sheet,
+  panelCtx,
   refetch,
 }: {
-  contest: ContestView;
   draft: Draft;
   picks: DraftPick[];
   teamById: Map<string, TeamInfo>;
@@ -842,36 +980,68 @@ function LiveRoom({
   setQueue: (q: DraftRef[]) => void;
   ratings: PlayerRating[];
   freshOverall: number | null;
-  /** Autodraft toggle + commissioner controls, shown under the board. */
-  controls: React.ReactNode;
-  /** Signed-out viewers only: a visible Sign in under the board. */
-  signInPrompt: React.ReactNode;
-  tab: RoomTab;
-  setTab: (t: RoomTab) => void;
-  onRequireAuth: () => void;
+  sheet: SheetControl;
+  panelCtx: RoomPanelContext;
   refetch: () => void;
 }) {
-  const teamCount = draft.draftOrder.length;
   const onClockTeamId = teamOnClock(draft);
   const onClockTeam = onClockTeamId ? teamById.get(onClockTeamId) : null;
-  const round = roundOf(draft.currentOverall, teamCount);
 
   // Display only — DraftRoom's clock timer resolves an expired pick.
   const remainingMs = useClockRemaining(draft.currentStartedAt, draft.pickSeconds);
+  const sec = remainingMs === null ? draft.pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
+  const [jump, setJump] = useState(0);
 
   return (
-    <div className="space-y-4 lg:space-y-6">
-      <BroadcastHeader
-        draft={draft}
-        round={round}
-        onClockTeamId={onClockTeamId}
-        onClockTeamName={onClockTeam?.teamName ?? 'Team'}
-        onClockAuto={!!onClockTeamId && autodraftTeamIds.has(onClockTeamId)}
-        isMyClock={isMyClock}
-        myTeamId={myTeam?.id ?? null}
-        remainingMs={remainingMs}
-      />
-
+    <RoomStage
+      sheet={sheet}
+      header={
+        <ClockStrip
+          draft={draft}
+          sec={sec}
+          remainingMs={remainingMs}
+          onClockTeamId={onClockTeamId}
+          onClockTeamName={onClockTeam?.teamName ?? 'Team'}
+          onClockAuto={!!onClockTeamId && autodraftTeamIds.has(onClockTeamId)}
+          isMyClock={isMyClock}
+          myTeamId={myTeam?.id ?? null}
+          onJump={() => setJump((n) => n + 1)}
+        />
+      }
+      status={<SheetClock label={isMyClock ? 'Your pick' : 'On the clock'} value={formatClock(sec)} urgent={sec <= 10} />}
+      renderPanel={(tab, collapsed) => (
+        <RoomPanel
+          {...panelCtx}
+          tab={tab}
+          collapsed={collapsed}
+          players={
+            <PlayersPanel
+              contest={panelCtx.contest}
+              draft={draft}
+              draftedByKey={draftedByKey}
+              teamById={teamById}
+              myTeam={myTeam}
+              isMyClock={isMyClock}
+              queue={queue}
+              setQueue={setQueue}
+              ratings={ratings}
+              onRequireAuth={panelCtx.onRequireAuth}
+              refetch={refetch}
+            />
+          }
+          queue={
+            <QueuePanel
+              draft={draft}
+              myTeam={myTeam}
+              queue={queue}
+              setQueue={setQueue}
+              ratings={ratings}
+              onRequireAuth={panelCtx.onRequireAuth}
+            />
+          }
+        />
+      )}
+    >
       <SnakeBoard
         draft={draft}
         picks={picks}
@@ -880,124 +1050,13 @@ function LiveRoom({
         myTeamId={myTeam?.id ?? null}
         autodraftTeamIds={autodraftTeamIds}
         clock={{
-          remainingSec: remainingMs === null ? null : Math.max(0, Math.ceil(remainingMs / 1000)),
+          remainingSec: remainingMs === null ? null : sec,
           mine: isMyClock,
         }}
         freshOverall={freshOverall}
+        jumpSignal={jump}
       />
-
-      {controls}
-      {signInPrompt}
-
-      {/* Mobile: the board above, tabs under it. */}
-      <div className="lg:hidden">
-        <RoomTabs tabs={ROOM_TABS} active={tab} onChange={setTab} ariaLabel="Draft room sections" />
-        {tab === 'players' && (
-          <PlayersPanel
-            contest={contest}
-            draft={draft}
-            draftedByKey={draftedByKey}
-            teamById={teamById}
-            myTeam={myTeam}
-            isMyClock={isMyClock}
-            queue={queue}
-            setQueue={setQueue}
-            ratings={ratings}
-            onRequireAuth={onRequireAuth}
-            refetch={refetch}
-          />
-        )}
-        {tab === 'queue' && (
-          <QueuePanel
-            draft={draft}
-            myTeam={myTeam}
-            queue={queue}
-            setQueue={setQueue}
-            ratings={ratings}
-            onRequireAuth={onRequireAuth}
-          />
-        )}
-        {tab === 'picks' && <PicksPanel picks={picks} teamById={teamById} teamCount={teamCount} />}
-      </div>
-
-      {/* Desktop: players under the board (2/3), queue + picks rail beside them. */}
-      <div className="hidden lg:grid grid-cols-3 gap-6">
-        <div className="col-span-2 min-w-0">
-          <PlayersPanel
-            contest={contest}
-            draft={draft}
-            draftedByKey={draftedByKey}
-            teamById={teamById}
-            myTeam={myTeam}
-            isMyClock={isMyClock}
-            queue={queue}
-            setQueue={setQueue}
-            ratings={ratings}
-            onRequireAuth={onRequireAuth}
-            refetch={refetch}
-          />
-        </div>
-        <div className="min-w-0">
-          <DesktopRail
-            draft={draft}
-            teamById={teamById}
-            myTeam={myTeam}
-            queue={queue}
-            setQueue={setQueue}
-            ratings={ratings}
-            picks={picks}
-            onRequireAuth={onRequireAuth}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DesktopRail(props: {
-  draft: Draft;
-  teamById: Map<string, TeamInfo>;
-  myTeam: TeamInfo | null;
-  queue: DraftRef[];
-  setQueue: (q: DraftRef[]) => void;
-  ratings: PlayerRating[];
-  picks: DraftPick[];
-  onRequireAuth: () => void;
-}) {
-  const [railTab, setRailTab] = useState<'queue' | 'picks'>('queue');
-  return (
-    <div>
-      <div className="flex gap-1 mb-4 bg-ink/[0.06] rounded-full p-1">
-        {(['queue', 'picks'] as const).map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setRailTab(id)}
-            aria-pressed={railTab === id}
-            className={[
-              'flex-1 px-3 py-2 min-h-[40px] rounded-full font-tight text-[11px] font-bold tracking-[0.08em] uppercase transition-colors duration-150 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              railTab === id ? 'bg-surface-hi text-ink shadow-soft' : 'text-muted hover:text-ink',
-            ].join(' ')}
-          >
-            {id}
-          </button>
-        ))}
-      </div>
-      {railTab === 'queue' && (
-        <QueuePanel
-          draft={props.draft}
-          myTeam={props.myTeam}
-          queue={props.queue}
-          setQueue={props.setQueue}
-          ratings={props.ratings}
-          onRequireAuth={props.onRequireAuth}
-        />
-      )}
-      {railTab === 'picks' && (
-        <PicksPanel picks={props.picks} teamById={props.teamById} teamCount={props.draft.draftOrder.length} />
-      )}
-    </div>
+    </RoomStage>
   );
 }
 
@@ -1025,7 +1084,7 @@ function useDeadlineRemaining(endsAt: string | null): number | null {
   return new Date(endsAt).getTime() - now;
 }
 
-// ─── Broadcast header ───────────────────────────────────────────────────────
+// ─── Clock strip ────────────────────────────────────────────────────────────
 
 /** Picks from now until the team's next turn (1 = the pick after this one);
  *  null when it has no turn left. */
@@ -1039,27 +1098,30 @@ function picksUntilTurn(draft: Draft, teamId: string): number | null {
   return null;
 }
 
-function BroadcastHeader({
+/** The live pick clock as a slim strip under the top bar: who is up, the timer,
+ *  how far off my turn is, and the time left as a thin bar. */
+function ClockStrip({
   draft,
-  round,
+  sec,
+  remainingMs,
   onClockTeamId,
   onClockTeamName,
   onClockAuto,
   isMyClock,
   myTeamId,
-  remainingMs,
+  onJump,
 }: {
   draft: Draft;
-  round: number;
+  sec: number;
+  remainingMs: number | null;
   onClockTeamId: string | null;
   onClockTeamName: string;
   onClockAuto: boolean;
   isMyClock: boolean;
   myTeamId: string | null;
-  remainingMs: number | null;
+  onJump: () => void;
 }) {
-  const sec = remainingMs === null ? draft.pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
-  // ≤10s: live and accent are both coral here, so urgency is pulse + size, not color.
+  // ≤10s: urgency is pulse + size, not color (live = accent = coral in dark mode).
   const low = sec <= 10;
   // The bar's viewBox is 100 wide, so the rect's width attribute is the percent left.
   const left =
@@ -1071,59 +1133,68 @@ function BroadcastHeader({
   return (
     <div
       className={[
-        'relative overflow-hidden rounded-card-lg bg-surface shadow-card px-4 pt-3.5 pb-5 lg:px-6 lg:pt-5 lg:pb-6',
-        isMyClock ? 'ring-2 ring-accent' : '',
+        'relative overflow-hidden rounded-b-card-lg shadow-soft lg:rounded-card-lg',
+        isMyClock ? 'bg-accent/10' : 'bg-surface',
       ].join(' ')}
     >
-      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:gap-6">
-        <div className="flex items-baseline justify-between gap-3 lg:flex-col lg:items-start lg:justify-start lg:gap-1">
-          <span className="font-tight text-[10.5px] font-bold tracking-[0.16em] uppercase text-muted">
-            Round {round} &middot; Pick {pickLabel(draft.currentOverall, draft.draftOrder.length)}
-          </span>
-          <span className="font-tight text-[11px] text-muted tabular">#{draft.currentOverall} overall</span>
-        </div>
-
-        <div className="flex flex-col items-center gap-2">
+      <div className="flex items-center gap-3 px-3 pb-3 pt-1.5 lg:px-5">
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
           {isMyClock ? (
-            <span className="inline-flex items-center h-8 lg:h-9 px-4 rounded-full bg-accent text-accent-ink font-tight text-[11.5px] font-extrabold tracking-[0.16em] uppercase">
+            <span className="inline-flex h-8 w-fit items-center rounded-full bg-accent px-4 font-tight text-[11.5px] font-extrabold uppercase tracking-[0.16em] text-accent-ink">
               Your turn
             </span>
           ) : (
-            <div className="flex items-center gap-2.5 h-8 lg:h-9 min-w-0 max-w-full">
-              <TeamAvatar id={onClockTeamId ?? ''} name={onClockTeamName} />
-              <span className="min-w-0 truncate font-tight text-[15px] lg:text-[17px] font-bold text-ink">
-                <span className="sr-only">On the clock: </span>
-                {onClockTeamName}
-              </span>
+            <div className="flex h-8 min-w-0 max-w-full items-center gap-2.5">
+              <TeamAvatar id={onClockTeamId ?? ''} name={onClockTeamName} size="sm" />
+              <div className="min-w-0">
+                <span className="block font-tight text-[9.5px] font-bold uppercase leading-none tracking-[0.14em] text-muted">
+                  On the clock
+                </span>
+                <span className="mt-0.5 block truncate font-tight text-[14px] font-bold leading-tight text-ink">
+                  {onClockTeamName}
+                </span>
+              </div>
               {onClockAuto && <AutoBadge />}
             </div>
           )}
-          <div
-            role="timer"
-            aria-label={`${sec} seconds remaining`}
-            className={[
-              'origin-center font-tight font-extrabold tabular leading-none tracking-[-0.02em] text-ink',
-              'text-[44px] lg:text-[56px]',
-              'motion-safe:transition-transform motion-safe:duration-300',
-              low ? 'scale-110 motion-safe:animate-cue-pulse' : '',
-            ].join(' ')}
-          >
-            {formatClock(sec)}
-          </div>
-        </div>
-
-        {until !== null && (
-          <div className="flex justify-center lg:justify-self-end">
+          {until !== null && (
             <span
               className={[
-                'inline-flex items-center h-8 px-3.5 rounded-full font-tight text-[11.5px] font-bold text-ink tabular',
-                until === 1 ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : 'bg-ink/[0.08]',
+                'w-fit font-tight text-[11.5px] font-bold tabular',
+                until === 1
+                  ? 'rounded-full bg-accent/15 px-2.5 py-0.5 text-ink ring-1 ring-inset ring-accent/60'
+                  : 'text-muted',
               ].join(' ')}
             >
               {until === 1 ? "You're up next" : `${until} picks until your turn`}
             </span>
-          </div>
-        )}
+          )}
+        </div>
+
+        <div
+          role="timer"
+          aria-label={`${sec} seconds remaining`}
+          className={[
+            'origin-center font-tight text-[26px] font-extrabold leading-none tracking-[-0.02em] text-ink tabular',
+            'motion-safe:transition-transform motion-safe:duration-300',
+            low ? 'scale-110 motion-safe:animate-cue-pulse' : '',
+          ].join(' ')}
+        >
+          {formatClock(sec)}
+        </div>
+
+        <button
+          type="button"
+          onClick={onJump}
+          aria-label="Scroll the board to the current pick"
+          className={[
+            'flex h-11 w-11 flex-shrink-0 cursor-pointer items-center justify-center rounded-full',
+            'bg-ink/[0.07] text-ink transition-colors duration-150 hover:bg-ink/[0.12]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          <CrosshairIcon />
+        </button>
       </div>
 
       <svg
@@ -1427,6 +1498,8 @@ function SnakeBoard({
   autodraftTeamIds,
   clock,
   freshOverall = null,
+  jumpSignal,
+  before,
 }: {
   draft: Draft;
   picks: DraftPick[];
@@ -1438,6 +1511,10 @@ function SnakeBoard({
   /** Live only: the pick on the clock. Omitted in the lobby and once complete. */
   clock?: { remainingSec: number | null; mine: boolean };
   freshOverall?: number | null;
+  /** Bump to scroll the pick on the clock into view. */
+  jumpSignal?: number;
+  /** Scrolls with the board, above it (the lobby panel). */
+  before?: React.ReactNode;
 }) {
   const n = draft.draftOrder.length;
   const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
@@ -1492,7 +1569,9 @@ function SnakeBoard({
       arrows
       myColumnId={myTeamId}
       focus={focus}
+      jumpSignal={jumpSignal}
       legend={picks.some((p) => ratingMap.has(ratingKey(p.playerLeague, p.playerId)))}
+      before={before}
       ariaLabel="Draft board"
     />
   );
@@ -1642,76 +1721,12 @@ function XIcon() {
   );
 }
 
-// ─── Picks panel (reverse-chron ticker) ────────────────────────────────────
+// ─── Complete strip ──────────────────────────────────────────────────────────
 
-function PicksPanel({
-  picks,
-  teamById,
-  teamCount,
-}: {
-  picks: DraftPick[];
-  teamById: Map<string, TeamInfo>;
-  teamCount: number;
-}) {
-  if (picks.length === 0) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
-        <p className="text-muted font-tight text-[13px]">No picks yet.</p>
-      </div>
-    );
-  }
-  const reversed = [...picks].sort((a, b) => b.overall - a.overall);
-  return (
-    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-      <ul aria-label="Pick history">
-        {reversed.map((p, idx) => (
-          <li
-            key={p.overall}
-            className={['flex items-center gap-3 px-4 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
-          >
-            <span className="font-tight text-[11px] font-bold text-muted tabular w-10 flex-shrink-0">
-              {pickLabel(p.overall, teamCount)}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="font-tight text-[13.5px] font-semibold text-ink truncate">
-                {p.playerName}
-                {p.auto && <span className="text-faint font-normal"> (auto)</span>}
-              </div>
-              <div className="font-tight text-[11px] text-muted truncate">
-                {teamById.get(p.teamId)?.teamName ?? 'Team'}
-                {p.price != null ? ` · $${p.price}` : ''}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// ─── Complete panel ──────────────────────────────────────────────────────────
-
-function CompletePanel({
-  draft,
-  picks,
-  teams,
-  basePath,
-}: {
-  draft: Draft;
-  picks: DraftPick[];
-  teams: TeamInfo[];
-  basePath: string;
-}) {
-  const byTeam = new Map<string, DraftPick[]>();
-  for (const p of picks) {
-    const arr = byTeam.get(p.teamId) ?? [];
-    arr.push(p);
-    byTeam.set(p.teamId, arr);
-  }
-
-  // A minute after the draft ends everyone goes back to the league (Hunter,
-  // 2026-10-11). Every completion path stamps currentStartedAt, so a room
-  // opened after that minute leaves right away.
+function CompleteStrip({ draft, basePath }: { draft: Draft; basePath: string }) {
+  // A minute after the draft ends, whoever watched it end goes back to the
+  // league (Hunter, 2026-10-11). Every completion path stamps currentStartedAt,
+  // the countdown's anchor. Rendered only for those viewers (sawLive).
   const router = useRouter();
   const [openedAt] = useState(() => Date.now());
   const endsAt = (draft.currentStartedAt ? Date.parse(draft.currentStartedAt) : openedAt) + 60_000;
@@ -1728,56 +1743,23 @@ function CompletePanel({
   }, [endsAt, basePath, router]);
 
   return (
-    <div className="space-y-6">
-      <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 text-center">
-        <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-accent mb-2 font-tight">
-          Draft complete
-        </div>
-        <h2 className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4">
-          {draft.rounds} rounds &middot; {picks.length} picks made
-        </h2>
+    <div className="rounded-b-card-lg bg-surface shadow-soft lg:rounded-card-lg">
+      <div className="flex min-h-[52px] items-center justify-between gap-3 px-3 py-1.5 lg:px-5">
+        <p className="m-0 min-w-0 truncate font-tight text-[12.5px] text-muted tabular">
+          Back to the league in {Math.ceil(msLeft / 1000)}s
+        </p>
         <Link
           href={basePath}
-          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full min-h-[44px] bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+          className="inline-flex min-h-[44px] flex-shrink-0 items-center justify-center rounded-full bg-accent px-5 font-tight text-[12px] font-bold uppercase tracking-[0.08em] text-accent-ink transition-opacity duration-150 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
         >
           View league
         </Link>
-        <p className="mt-3 font-tight text-[12px] text-faint tabular">
-          Back to the league in {Math.ceil(msLeft / 1000)}s
-        </p>
-      </div>
-
-      <div className="grid sm:grid-cols-2 gap-4">
-        {teams.map((t) => {
-          const haul = (byTeam.get(t.id) ?? []).sort((a, b) => a.overall - b.overall);
-          return (
-            <div key={t.id} className="bg-surface rounded-card-lg shadow-card p-4">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="font-tight text-[13.5px] font-bold text-ink truncate">{t.teamName}</span>
-                <Link
-                  href={`${basePath}/t/${t.id}`}
-                  className="text-[11px] font-tight font-bold text-accent hover:opacity-80 transition-opacity flex-shrink-0"
-                >
-                  View team
-                </Link>
-              </div>
-              <ul className="space-y-1">
-                {haul.map((p) => (
-                  <li key={p.overall} className="font-tight text-[12.5px] text-muted truncate">
-                    {p.playerName}
-                    {p.price != null && <span className="text-faint"> &middot; ${p.price}</span>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
 }
 
-// ─── Skeletons + tab icons ──────────────────────────────────────────────────
+// ─── Skeleton ───────────────────────────────────────────────────────────────
 
 function RoomSkeleton() {
   return (

@@ -174,6 +174,7 @@ export function LeagueFeed({ contest }: Props) {
   }, [pendingDeleteId, refetch]);
 
   return (
+    <>
     <div className="space-y-4">
       {isMember ? (
         <div className="bg-surface rounded-card-lg shadow-card p-4">
@@ -258,26 +259,29 @@ export function LeagueFeed({ contest }: Props) {
           ))}
         </ol>
       )}
-
-      <AuthModal
-        open={authOpen}
-        dismissible
-        headline="Sign in to chat"
-        subhead="Join the conversation with your league."
-        onDismiss={() => setAuthOpen(false)}
-      />
-
-      <ConfirmDialog
-        open={pendingDeleteId != null}
-        title="Delete message?"
-        body="This removes it for everyone in the league."
-        confirmLabel="Delete"
-        busyLabel="Deleting…"
-        busy={deleting}
-        onConfirm={handleDeleteMessage}
-        onCancel={() => setPendingDeleteId(null)}
-      />
     </div>
+
+    {/* Outside the space-y stack: its sibling margin landed on these fixed
+        overlays and started the scrim 16px low. */}
+    <AuthModal
+      open={authOpen}
+      dismissible
+      headline="Sign in to chat"
+      subhead="Join the conversation with your league."
+      onDismiss={() => setAuthOpen(false)}
+    />
+
+    <ConfirmDialog
+      open={pendingDeleteId != null}
+      title="Delete message?"
+      body="This removes it for everyone in the league."
+      confirmLabel="Delete"
+      busyLabel="Deleting…"
+      busy={deleting}
+      onConfirm={handleDeleteMessage}
+      onCancel={() => setPendingDeleteId(null)}
+    />
+    </>
   );
 }
 

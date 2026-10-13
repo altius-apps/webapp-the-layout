@@ -1,9 +1,11 @@
 // /fantasy/l/[contestId]/waivers — the Waivers tab. Chrome from the parent
-// layout. Guard: contest must be drafted + weekly-stats mode + draft
-// complete + FAAB waivers enabled, else render a one-line gate message.
+// layout. Event contests (USAU, WFDF, EUCS) have no waivers: 404 (Hunter).
+// Weekly: contest must be drafted + draft complete + FAAB waivers enabled,
+// else render a one-line gate message.
 
+import { notFound } from 'next/navigation';
 import { getContest, waiverSettings } from '@/lib/fantasy/leagues';
-import { getDraft } from '@/lib/fantasy/draft-room';
+import { getDraftStatusServer } from '@/lib/fantasy/server';
 import { WaiversPanel } from '@/components/fantasy/waivers/waivers-panel';
 
 export const revalidate = 0;
@@ -14,12 +16,19 @@ export default async function ContestWaiversPage({ params }: { params: { contest
   if (!contest) return null;
 
   const isWeekly = contest.settings.mode === 'weekly-stats';
+  if (!isWeekly) notFound();
+
   const isDrafted = contest.settings.draft === true;
-  const draft = isDrafted ? await getDraft(contest.id).catch(() => null) : null;
-  const draftComplete = draft?.status === 'complete';
+  const draftStatus = isDrafted
+    ? await getDraftStatusServer(contest.id).catch((err) => {
+        console.error('[fantasy waivers] getDraftStatusServer failed', err);
+        return null;
+      })
+    : null;
+  const draftComplete = draftStatus === 'complete';
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
 
-  if (!isWeekly || !isDrafted || !draftComplete || !isFaab) {
+  if (!isDrafted || !draftComplete || !isFaab) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
         <p className="font-tight text-[14px] text-muted">

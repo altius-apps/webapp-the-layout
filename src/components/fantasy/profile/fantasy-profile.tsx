@@ -25,7 +25,7 @@ import {
   type TeamTransaction,
 } from '@/lib/fantasy/leagues';
 import { getContestTeamRoster, type ContestRosterSlot } from '@/lib/fantasy/draft';
-import { getDraft } from '@/lib/fantasy/draft-room';
+import { getDraftStatusPublic } from '@/lib/fantasy/server';
 import { contestFormat } from '@/lib/fantasy/competitions';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import { ordinal } from '@/lib/bracket-tree';
@@ -41,12 +41,17 @@ export async function FantasyProfile({ contest, teamId }: { contest: ContestView
   const isH2H = !isEvent && contestFormat(contest.settings) === 'h2h';
   const isDrafted = contest.settings.draft === true;
 
-  const [periods, standings, h2h, matchups, draft, transactions, owned] = await Promise.all([
+  const [periods, standings, h2h, matchups, draftStatus, transactions, owned] = await Promise.all([
     getContestPeriods(contest.id).catch(() => []),
     getContestStandings(contest.id).catch(() => []),
     isH2H ? getH2HStandings(contest.id).catch(() => []) : Promise.resolve([]),
     isH2H ? getMatchups(contest.id).catch(() => []) : Promise.resolve([]),
-    !isEvent && isDrafted ? getDraft(contest.id).catch(() => null) : Promise.resolve(null),
+    !isEvent && isDrafted
+      ? getDraftStatusPublic(contest.id).catch((err) => {
+          console.error('[fantasy profile] getDraftStatusPublic failed', err);
+          return null;
+        })
+      : Promise.resolve(null),
     isEvent ? Promise.resolve([] as TeamTransaction[]) : getTeamTransactions(contest.id, teamId).catch(() => []),
     isEvent ? Promise.resolve([]) : getTeamPlayers(contest.id, teamId).catch(() => []),
   ]);
@@ -104,7 +109,7 @@ export async function FantasyProfile({ contest, teamId }: { contest: ContestView
       : currentMatchup.homePoints
     : null;
 
-  const tradesOpen = !isEvent && isDrafted && draft?.status === 'complete';
+  const tradesOpen = !isEvent && isDrafted && draftStatus === 'complete';
   const owner = team.ownerUsername ? `@${team.ownerUsername}` : team.ownerDisplayName;
   const base = `/fantasy/l/${contest.id}`;
 

@@ -1,9 +1,10 @@
 'use client';
 
 // LeagueView — the "League" tab body (root tab for points/event contests;
-// 4th tab for h2h weekly contests). Top → bottom: draft card,
-// standings (h2h or points), playoffs mini-section,
-// schedule strip (weekly only), invite code + join CTA. Web port of the
+// 4th tab for h2h weekly contests). Top → bottom: draft card (until the
+// draft is done), standings (h2h or points), playoffs mini-section,
+// schedule strip (weekly only), invite code (until the draft is done) + join
+// CTA, then the draft card once the draft is done. Web port of the
 // mobile app's LeagueView.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueView.tsx).
 //
@@ -30,7 +31,7 @@ import type { LeaderboardRow } from '@/lib/fantasy/data';
 import { contestFormat } from '@/lib/fantasy/competitions';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyWeek } from '@/lib/fantasy/weeks';
-import { DraftCard } from '@/components/fantasy/draft-card';
+import { DraftCard, useDraftCardData } from '@/components/fantasy/draft-card';
 import { TradesCard } from '@/components/fantasy/trades/trades-card';
 import { WaiversCard } from '@/components/fantasy/waivers-card';
 import { H2HStandings } from '@/components/fantasy/h2h-standings';
@@ -58,6 +59,10 @@ export function LeagueView({ contest }: { contest: ContestView }) {
   const isH2H = contestFormat(contest.settings) === 'h2h';
   const isWeekly = contest.settings.mode === 'weekly-stats';
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
+  // After the draft its card (the way back to the board) drops to the very
+  // bottom and the invite card goes away (Hunter, 2026-10-13).
+  const draftCard = useDraftCardData(contest, contest.leagueId);
+  const draftDone = draftCard.shown?.draft?.status === 'complete';
 
   const [weeks, setWeeks] = useState<FantasyWeek[]>([]);
   const [pointsStandings, setPointsStandings] = useState<LeaderboardRow[]>([]);
@@ -92,8 +97,8 @@ export function LeagueView({ contest }: { contest: ContestView }) {
 
   return (
     <div className="space-y-8">
-      {/* ── Draft card ─────────────────────────── */}
-      <DraftCard contest={contest} leagueId={contest.leagueId} />
+      {/* ── Draft card (until the draft is done) ── */}
+      {!draftDone && <DraftCard contest={contest} data={draftCard} />}
 
       {/* ── Standings ──────────────────────────────────────────────────── */}
       <section aria-labelledby="standings-heading">
@@ -161,7 +166,8 @@ export function LeagueView({ contest }: { contest: ContestView }) {
                         <span className="font-tight text-[14px] font-semibold text-ink truncate">
                           {row.teamName}
                         </span>
-                        {(row.ownerDisplayName || row.ownerUsername) && (
+                        {(row.ownerDisplayName || row.ownerUsername) &&
+                          (row.ownerDisplayName ?? row.ownerUsername) !== row.teamName && (
                           <span className="font-tight text-[11px] text-muted truncate">
                             {row.ownerDisplayName ?? row.ownerUsername}
                           </span>
@@ -217,8 +223,11 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       )}
 
       {/* ── Invite + join CTA ───────────────────── */}
-      <InviteCodeRow leagueId={contest.leagueId} />
+      {!draftDone && <InviteCodeRow leagueId={contest.leagueId} />}
       <LeagueMembersPanel leagueId={contest.leagueId} />
+
+      {/* ── Draft card (after the draft: results link, last) ── */}
+      {draftDone && <DraftCard contest={contest} data={draftCard} />}
     </div>
   );
 }

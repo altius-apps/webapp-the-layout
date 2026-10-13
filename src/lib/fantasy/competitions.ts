@@ -109,7 +109,7 @@ export function teamSize(settings: ContestSettings): number {
 }
 
 /** Team-limit stepper bounds for Create a League and Settings → Teams. */
-export const MIN_TEAMS = 4;
+export const MIN_TEAMS = 2;
 export const MAX_TEAMS = 16;
 // Matches the DB trigger's coalesce(maxTeams, 12) and mobile.
 export const DEFAULT_MAX_TEAMS = 12;
@@ -117,7 +117,7 @@ export const DEFAULT_MAX_TEAMS = 12;
 /** Team-cap stops for Create a League → Total teams and Settings → Teams. The
  *  last, ∞, is stored as unlimitedTeams with maxTeams DEFAULT_MAX_TEAMS
  *  (fantasy_set_contest_limits range-checks maxTeams even when unlimited). */
-export const TEAM_LIMIT_STOPS = [4, 5, 6, 7, 8, 9, 10, 12, 16, Infinity];
+export const TEAM_LIMIT_STOPS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, Infinity];
 
 /** Divisions a league can draft from, per competition. College Nationals has no
  *  Mixed. Competitions not listed have no division choice. */

@@ -8,12 +8,15 @@
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueShell.tsx).
 // Every screen inside a league (root, team, players, league, draft,
 // settings, t/[teamId]) shares this one shell instead of each page
-// re-fetching the contest and re-rendering the header.
+// re-fetching the contest and re-rendering the header. The one exception is the
+// draft room (/draft), a full-screen surface that covers the header and nav, so
+// LeagueChrome leaves them out there.
 
 import { AppShell } from '@/components/page-shell';
 import { getContest, getLeague } from '@/lib/fantasy/leagues';
 import { LeagueHeader } from '@/components/fantasy/league-header';
 import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
+import { LeagueChrome } from '@/components/fantasy/league-chrome';
 import { EnsureContestTeam } from '@/components/fantasy/ensure-contest-team';
 import { LeagueContentFrame } from '@/components/fantasy/league-content-frame';
 
@@ -44,10 +47,12 @@ export default async function LeagueLayout({
 
   return (
     <AppShell hideFooterMobile>
-      <div className="px-5 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
-        <LeagueHeader contest={contest} league={league} />
-      </div>
-      <LeagueSectionNav contest={contest} />
+      <LeagueChrome>
+        <div className="px-5 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
+          <LeagueHeader contest={contest} league={league} />
+        </div>
+        <LeagueSectionNav contest={contest} />
+      </LeagueChrome>
       <LeagueContentFrame>
         <EnsureContestTeam contestId={contest.id} leagueId={contest.leagueId} seasonYear={contest.seasonYear}>
           {children}

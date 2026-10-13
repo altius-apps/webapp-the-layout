@@ -5,8 +5,9 @@
 // hub/game-home pages need: card copy, status, badge, brand mark.
 //
 // Statuses (Hunter, 2026-08-27; wfdf-wucc promoted to live 2026-09-08):
-// ufa + usau-club-nationals + wfdf-wucc='live' (event games are window-gated,
-// see draftOpensDate below), usau-college-nationals / pul / wul='coming-soon'.
+// ufa + usau-club-nationals + wfdf-wucc='live' (event games draft once their
+// event's rosters are in — fantasy_draft_rosters_ready; no calendar floor since
+// 2026-10-11), usau-college-nationals / pul / wul='coming-soon'.
 // eucs='coming-soon' — shown but greyed (Hunter, 2026-09-08) until we define a
 // resolver that identifies the season's championship (EUCF); the series has no
 // single start date we can point a league at.
@@ -101,30 +102,4 @@ export function getGame(id: string): GameDef | null {
 /** Cards the hub renders — hidden games excluded entirely. */
 export function hubGames(): GameDef[] {
   return GAMES.filter((g) => g.status !== 'hidden');
-}
-
-/**
- * When drafts open for an event-mode contest: the Saturday strictly before
- * the event's start date (rosters are published by then — Hunter's rule,
- * 2026-08-27). Pure calendar math on a 'YYYY-MM-DD' date; returns the same
- * shape. MIRRORS public.fantasy_draft_earliest_at (migration 20260827100000),
- * which enforces this (at midnight ET) in fantasy_schedule_draft /
- * fantasy_start_draft — keep both in lockstep. Display-only on this side.
- */
-export function draftOpensDate(eventStartDate: string): string {
-  const [y, m, d] = eventStartDate.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d, 12)); // noon avoids DST edges
-  dt.setUTCDate(dt.getUTCDate() - (dt.getUTCDay() + 1)); // Sat strictly before
-  return dt.toISOString().slice(0, 10);
-}
-
-/** "Sat, Oct 17" for a 'YYYY-MM-DD' date (calendar date, no timezone). */
-export function formatDateOnly(date: string): string {
-  const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  });
 }

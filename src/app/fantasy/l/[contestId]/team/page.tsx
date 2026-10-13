@@ -6,8 +6,8 @@
 // bench island itself is auth-gated (AuthModal on write attempts, per the
 // shared conventions).
 
-import { getContest, getMyContestTeam } from '@/lib/fantasy/leagues';
-import { getDraft } from '@/lib/fantasy/draft-room';
+import { getContest } from '@/lib/fantasy/leagues';
+import { getDraftStatusServer, getMyContestTeamServer } from '@/lib/fantasy/server';
 import { getContestTeamRoster } from '@/lib/fantasy/draft';
 import { TeamTabClient } from '@/components/fantasy/team-tab-client';
 
@@ -15,6 +15,8 @@ export const revalidate = 0;
 export const dynamic = 'force-dynamic';
 
 export default async function ContestTeamPage({ params }: { params: { contestId: string } }) {
+  // Not logged: crawlers hit junk ids all day, and the layout already renders
+  // the not-found card for them.
   const contest = await getContest(params.contestId).catch(() => null);
   if (!contest) return null;
 
@@ -31,8 +33,11 @@ export default async function ContestTeamPage({ params }: { params: { contestId:
   }
 
   // Event mode: seeded roster once the draft is complete.
-  const draft = await getDraft(contest.id).catch(() => null);
-  const draftComplete = draft?.status === 'complete';
+  const draftStatus = await getDraftStatusServer(contest.id).catch((err) => {
+    console.error('[fantasy team] getDraftStatusServer failed', err);
+    return null;
+  });
+  const draftComplete = draftStatus === 'complete';
 
   if (!contest.settings.draft || !draftComplete) {
     return (
@@ -45,7 +50,10 @@ export default async function ContestTeamPage({ params }: { params: { contestId:
     );
   }
 
-  const myTeam = await getMyContestTeam(contest.id).catch(() => null);
+  const myTeam = await getMyContestTeamServer(contest.id).catch((err) => {
+    console.error('[fantasy team] getMyContestTeamServer failed', err);
+    return null;
+  });
   if (!myTeam) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
@@ -56,7 +64,10 @@ export default async function ContestTeamPage({ params }: { params: { contestId:
     );
   }
 
-  const roster = await getContestTeamRoster(contest, myTeam.id, 'event').catch(() => []);
+  const roster = await getContestTeamRoster(contest, myTeam.id, 'event').catch((err) => {
+    console.error('[fantasy team] getContestTeamRoster failed', err);
+    return [];
+  });
 
   if (roster.length === 0) {
     return (
@@ -75,7 +86,7 @@ export default async function ContestTeamPage({ params }: { params: { contestId:
           className={['flex items-center gap-3 px-5 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
         >
           <span className="flex-shrink-0 w-5 h-5 rounded-full bg-ink/5 text-[9px] font-bold flex items-center justify-center font-tight text-ink">
-            {slot.role === 'offender' ? 'O' : 'D'}
+            {slot.role === 'offender' ? 'O' : slot.role === 'defender' ? 'D' : 'F'}
           </span>
           <span className="min-w-0 flex-1">
             <span className="block font-tight text-[14px] font-semibold text-ink truncate">{slot.fullName}</span>

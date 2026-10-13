@@ -1416,14 +1416,18 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // ── Focus management ────────────────────────────────────────────────────
   const panelRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (open) {
+      wasOpenRef.current = true;
       // Small delay lets the portal render before focusing.
       const id = setTimeout(() => closeButtonRef.current?.focus(), 50);
       return () => clearTimeout(id);
-    } else {
-      // Return focus to the hamburger trigger.
+    } else if (wasOpenRef.current) {
+      // Return focus to the hamburger trigger — only after a real close, or
+      // every page load painted a focus ring on it.
+      wasOpenRef.current = false;
       triggerRef.current?.focus();
     }
   }, [open, triggerRef]);
@@ -1537,10 +1541,13 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           // into one transform, so the md: overrides neutralize the other axis.
           // Also transition border-radius so the left corners round/square
           // smoothly as the league fly-out opens/closes beside the panel.
-          'transition-[transform,border-radius] motion-reduce:transition-none',
+          // Closed, it goes invisible once the slide ends: parked just off
+          // screen, its shadow-2xl still bled into the top (phone) / right
+          // (desktop) edge of every page.
+          'transition-[transform,border-radius,visibility] motion-reduce:transition-none',
           open
-            ? 'translate-y-0 translate-x-0'
-            : '-translate-y-full md:translate-y-0 md:translate-x-full',
+            ? 'visible translate-y-0 translate-x-0'
+            : 'invisible -translate-y-full md:translate-y-0 md:translate-x-full',
         ].join(' ')}
         style={{ transitionDuration: '240ms', transitionTimingFunction: 'ease-out' }}
       >

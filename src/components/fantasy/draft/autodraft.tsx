@@ -4,7 +4,7 @@
 // (the team's queue, then the best available) and puts the team on autodraft.
 // A manager can turn it on or off for their own team. A team on autodraft
 // picks, or nominates, the moment it's up. fantasy_set_autodraft enforces
-// "own team only".
+// "own team only". The toggle lives in the room's settings popover (gear).
 
 import { useState } from 'react';
 import { setAutodraft } from '@/lib/fantasy/draft-room';
@@ -45,7 +45,7 @@ export function AutodraftToggle({
   };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card px-4 py-3.5 lg:px-5">
+    <div>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="m-0 font-tight text-[13.5px] font-bold text-ink">Autodraft</p>

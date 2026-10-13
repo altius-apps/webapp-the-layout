@@ -5,12 +5,13 @@
 // action buttons: receiver on proposed → Accept/Reject; proposer on
 // proposed|accepted → Cancel; commissioner on proposed|accepted → Veto, and
 // on accepted → Approve now. All destructive/committing actions confirm via
-// window.confirm; RPC errors render inline. Web port of the mobile app's
+// ConfirmDialog; RPC errors render inline. Web port of the mobile app's
 // TradeCard.tsx (altiusapps/mobileapp-thelayout ·
 // src/components/fantasy/trades/TradeCard.tsx).
 
 import { useState } from 'react';
 import { respondTrade, type Trade, type TradeAction } from '@/lib/fantasy/leagues';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 
 interface TeamLabel {
   teamId: string;
@@ -64,28 +65,33 @@ function formatExecutesAt(iso: string): string {
   });
 }
 
-const CONFIRM_COPY: Record<TradeAction, { message: string; confirmLabel: string; destructive?: boolean }> = {
+const CONFIRM_COPY: Record<TradeAction, { title: string; body: string; confirmLabel: string; destructive?: boolean }> = {
   accept: {
-    message: 'Accept trade? This trade will execute in 24 hours unless the commissioner vetoes it.',
+    title: 'Accept trade?',
+    body: 'This trade will execute in 24 hours unless the commissioner vetoes it.',
     confirmLabel: 'Accept',
   },
   reject: {
-    message: 'Reject trade? This cannot be undone.',
+    title: 'Reject trade?',
+    body: 'This cannot be undone.',
     confirmLabel: 'Reject',
     destructive: true,
   },
   cancel: {
-    message: 'Cancel trade? This will withdraw your proposal.',
+    title: 'Cancel trade?',
+    body: 'This will withdraw your proposal.',
     confirmLabel: 'Cancel trade',
     destructive: true,
   },
   veto: {
-    message: 'Veto this trade? The trade will be rejected and will not execute.',
+    title: 'Veto this trade?',
+    body: 'The trade will be rejected and will not execute.',
     confirmLabel: 'Veto',
     destructive: true,
   },
   approve: {
-    message: 'Approve now? This skips the 24-hour review and executes the trade immediately.',
+    title: 'Approve now?',
+    body: 'This skips the 24-hour review and executes the trade immediately.',
     confirmLabel: 'Approve',
   },
 };
@@ -93,6 +99,7 @@ const CONFIRM_COPY: Record<TradeAction, { message: string; confirmLabel: string;
 export function TradeCard({ trade, proposerTeam, receiverTeam, myTeamId, isCommissioner, onChanged }: Props) {
   const [busyAction, setBusyAction] = useState<TradeAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<TradeAction | null>(null);
 
   const isReceiver = myTeamId != null && myTeamId === trade.receiverTeamId;
   const isProposer = myTeamId != null && myTeamId === trade.proposerTeamId;
@@ -102,16 +109,13 @@ export function TradeCard({ trade, proposerTeam, receiverTeam, myTeamId, isCommi
     setBusyAction(action);
     try {
       await respondTrade(trade.id, action);
+      setConfirming(null);
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong — try again.');
     } finally {
       setBusyAction(null);
     }
-  };
-
-  const confirmAndRun = (action: TradeAction) => {
-    if (window.confirm(CONFIRM_COPY[action].message)) void run(action);
   };
 
   const actions: TradeAction[] = [];
@@ -187,7 +191,10 @@ export function TradeCard({ trade, proposerTeam, receiverTeam, myTeamId, isCommi
               <button
                 key={action}
                 type="button"
-                onClick={() => confirmAndRun(action)}
+                onClick={() => {
+                  setError(null);
+                  setConfirming(action);
+                }}
                 disabled={busyAction != null}
                 className={[
                   'min-h-[40px] px-4 rounded-full font-tight text-[12.5px] font-bold cursor-pointer',
@@ -211,6 +218,19 @@ export function TradeCard({ trade, proposerTeam, receiverTeam, myTeamId, isCommi
             );
           })}
         </div>
+      )}
+
+      {confirming && (
+        <ConfirmDialog
+          open
+          title={CONFIRM_COPY[confirming].title}
+          body={CONFIRM_COPY[confirming].body}
+          confirmLabel={CONFIRM_COPY[confirming].confirmLabel}
+          busy={busyAction != null}
+          error={error}
+          onConfirm={() => void run(confirming)}
+          onCancel={() => setConfirming(null)}
+        />
       )}
     </div>
   );

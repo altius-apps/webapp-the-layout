@@ -539,23 +539,6 @@ export function subscribeAuction(draftId: string, onChange: () => void): Realtim
     .subscribe();
 }
 
-// ── Commissioner draft controls ─────────────────────────────────────────────
-
-/** Revert the latest pick (snake) / latest won nomination (auction). */
-export async function undoLastPick(draftId: string): Promise<Draft> {
-  const { data, error } = await client().rpc('fantasy_undo_last_pick', { p_draft: draftId });
-  if (error) throw error;
-  return mapDraft(data as Record<string, unknown>);
-}
-
-/** Expire the running clock so the on-clock team is autopicked / the open
- *  nomination closes right now. Returns the number of state transitions. */
-export async function skipClock(draftId: string): Promise<number> {
-  const { data, error } = await client().rpc('fantasy_skip_clock', { p_draft: draftId });
-  if (error) throw error;
-  return (data as number) ?? 0;
-}
-
 // ── Realtime ────────────────────────────────────────────────────────────────
 
 /** Subscribe a draft room: fires on every new pick and on draft-row updates

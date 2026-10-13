@@ -1,9 +1,11 @@
 // /fantasy/l/[contestId]/trades — the Trades tab. Chrome from the parent
-// layout. Guard: contest must be drafted + weekly-stats mode + draft
-// complete, else render a one-line gate message.
+// layout. Event contests (USAU, WFDF, EUCS) have no trades: 404 (Hunter).
+// Weekly: contest must be drafted + draft complete, else render a one-line
+// gate message.
 
+import { notFound } from 'next/navigation';
 import { getContest } from '@/lib/fantasy/leagues';
-import { getDraft } from '@/lib/fantasy/draft-room';
+import { getDraftStatusServer } from '@/lib/fantasy/server';
 import { TradesPanel } from '@/components/fantasy/trades/trades-panel';
 
 export const revalidate = 0;
@@ -14,17 +16,16 @@ export default async function ContestTradesPage({ params }: { params: { contestI
   if (!contest) return null;
 
   const isWeekly = contest.settings.mode === 'weekly-stats';
-  const isDrafted = contest.settings.draft === true;
-  const draft = isDrafted ? await getDraft(contest.id).catch(() => null) : null;
-  const draftComplete = draft?.status === 'complete';
+  if (!isWeekly) notFound();
 
-  if (!isWeekly) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
-        <p className="font-tight text-[14px] text-muted">Single-event leagues don&apos;t have trades.</p>
-      </div>
-    );
-  }
+  const isDrafted = contest.settings.draft === true;
+  const draftStatus = isDrafted
+    ? await getDraftStatusServer(contest.id).catch((err) => {
+        console.error('[fantasy trades] getDraftStatusServer failed', err);
+        return null;
+      })
+    : null;
+  const draftComplete = draftStatus === 'complete';
 
   if (!isDrafted || !draftComplete) {
     return (

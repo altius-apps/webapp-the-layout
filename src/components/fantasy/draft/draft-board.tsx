@@ -6,11 +6,15 @@
 // (detail line, live-bid badge, lit high bidder). The board never sees picks or
 // nominations: each room maps its own data to BoardCell states.
 //
+// It fills the room's stage and is the scroller (both axes, header sticky). The
+// bottom sheet floats over its lower part, so it keeps `--sheet-peek` of padding
+// under the last row and measures the sheet when deciding whether the pick on the
+// clock is in view.
+//
 // Pick tiles are colored by the player's rank band, the stand-in for Sleeper's
 // position colors (frisbee has no positions in our data, and the rating tier is
 // ~80% "S"). Unrated players (contests without ratings) get one neutral tile.
-// Tiles are always-light faces with dark navy text, inside the navy
-// .draft-theme arena.
+// Tiles are always-light faces with dark navy text, in both app themes.
 
 import { useEffect, useRef } from 'react';
 import { AutoBadge } from './autodraft';
@@ -152,7 +156,9 @@ export function DraftBoard({
   arrows = false,
   myColumnId,
   focus = null,
+  jumpSignal = 0,
   legend = false,
+  before,
   ariaLabel,
 }: {
   columns: BoardColumn[];
@@ -164,8 +170,12 @@ export function DraftBoard({
   myColumnId: string | null;
   /** The cell to keep in view (the pick on the clock). */
   focus?: { row: number; col: number } | null;
+  /** Bump to scroll `focus` into view even if it is already on screen. */
+  jumpSignal?: number;
   /** Show the rank-color key (only when some pick has a rating). */
   legend?: boolean;
+  /** Scrolls with the board, above the team header (the lobby panel). */
+  before?: React.ReactNode;
   ariaLabel: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -178,9 +188,12 @@ export function DraftBoard({
     const el = box.querySelector<HTMLElement>(`[data-cell="${focus.row}:${focus.col}"]`);
     if (!el) return;
     const headerH = headerRef.current?.offsetHeight ?? 0;
+    // The bottom sheet covers the lower part of the scroller: that part isn't "in view".
+    const sheet = box.closest('[data-room-stage]')?.querySelector('[data-room-sheet]');
+    const covered = sheet ? Math.max(0, box.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top) : 0;
     const visible =
       el.offsetTop >= box.scrollTop + headerH &&
-      el.offsetTop + el.offsetHeight <= box.scrollTop + box.clientHeight &&
+      el.offsetTop + el.offsetHeight <= box.scrollTop + box.clientHeight - covered &&
       el.offsetLeft >= box.scrollLeft &&
       el.offsetLeft + el.offsetWidth <= box.scrollLeft + box.clientWidth;
     if (visible && !force) return;
@@ -199,95 +212,25 @@ export function DraftBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.row, focus?.col]);
 
-  if (n === 0) {
-    return (
-      <div className="rounded-card-lg bg-surface p-8 text-center">
-        <p className="font-tight text-[13px] text-muted">The board fills in once the draft order is set.</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (jumpSignal > 0) scrollToFocus(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpSignal]);
 
   return (
-    <div>
-      <div
-        ref={scrollRef}
-        role="table"
-        aria-label={ariaLabel}
-        className="relative overflow-auto max-h-[46vh] lg:max-h-[60vh]"
-      >
-        <div className="w-max min-w-full">
-          {/* Team header — sticky over the rounds as they scroll under it. */}
-          <div ref={headerRef} role="row" className="sticky top-0 z-10 flex gap-1.5 bg-bg pb-2">
-            {columns.map((c) => {
-              const mine = c.id === myColumnId;
-              return (
-                <div
-                  key={c.id}
-                  role="columnheader"
-                  className={[
-                    CELL_WIDTH,
-                    'flex flex-col items-center gap-1 rounded-card-sm px-1.5 pt-1.5 pb-1.5 transition-colors duration-200',
-                    c.lit ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : '',
-                  ].join(' ')}
-                >
-                  {c.badge ? (
-                    <span
-                      className={[
-                        'inline-flex items-center justify-center min-w-8 h-8 lg:min-w-9 lg:h-9 px-1.5 rounded-full',
-                        'font-tight text-[11px] lg:text-[12px] font-extrabold tabular',
-                        c.lit ? 'bg-accent text-accent-ink' : 'bg-ink/15 text-ink',
-                      ].join(' ')}
-                    >
-                      {c.badge}
-                    </span>
-                  ) : (
-                    <TeamAvatar id={c.id} name={c.name} />
-                  )}
-                  <span className="flex items-center gap-1 max-w-full min-w-0">
-                    <span
-                      className={[
-                        'font-tight text-[11px] lg:text-[12px] truncate',
-                        mine ? 'font-extrabold text-ink' : 'font-semibold text-muted',
-                      ].join(' ')}
-                    >
-                      {c.name}
-                    </span>
-                    {c.auto && <AutoBadge />}
-                  </span>
-                  {c.detail && <div className="w-full font-tight text-[10.5px] text-muted tabular">{c.detail}</div>}
-                  {mine && <span aria-hidden="true" className="h-[3px] w-6 rounded-full bg-accent" />}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            {Array.from({ length: rows }, (_, row) => (
-              <div key={row} role="row" className="flex gap-1.5">
-                {columns.map((c, col) => {
-                  const turn = arrows && row < rows - 1 && (row % 2 === 0 ? col === n - 1 : col === 0);
-                  const dir: ArrowDir | null = !arrows ? null : turn ? 'down' : row % 2 === 0 ? 'right' : 'left';
-                  return (
-                    <Cell
-                      key={c.id}
-                      dataCell={`${row}:${col}`}
-                      cell={cellAt(row, col)}
-                      teamName={c.name}
-                      mine={c.id === myColumnId}
-                      dir={dir}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+    <div
+      ref={scrollRef}
+      className="relative h-full overflow-auto overscroll-contain px-3 pb-[calc(var(--sheet-peek,20rem)+1rem)] lg:px-5"
+    >
+      {before}
+      {n === 0 ? (
+        <div className="rounded-card-lg bg-surface p-8 text-center">
+          <p className="font-tight text-[13px] text-muted">The board fills in once the draft order is set.</p>
         </div>
-      </div>
-
-      {(legend || focus) && (
-        <div className="flex items-center justify-between gap-3 flex-wrap mt-2.5 px-1">
-          {legend ? (
-            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap font-tight text-[10.5px] text-muted">
+      ) : (
+        <>
+          {legend && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-2 pt-1 font-tight text-[10.5px] text-muted">
               <span className="font-bold tracking-[0.12em] uppercase text-faint">Rank</span>
               {LEGEND.map((l) => (
                 <span key={l.tone} className="inline-flex items-center gap-1.5">
@@ -296,25 +239,76 @@ export function DraftBoard({
                 </span>
               ))}
             </div>
-          ) : (
-            <span />
           )}
-          {focus && (
-            <button
-              type="button"
-              onClick={() => scrollToFocus(true)}
-              className={[
-                'inline-flex items-center gap-1.5 px-3 min-h-[32px] rounded-full',
-                'font-tight text-[10.5px] font-bold tracking-[0.12em] uppercase',
-                'bg-ink/[0.07] text-ink hover:bg-ink/[0.12] transition-colors duration-150 cursor-pointer',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              ].join(' ')}
-            >
-              <CrosshairIcon />
-              Current pick
-            </button>
-          )}
-        </div>
+
+          <div role="table" aria-label={ariaLabel} className="w-max min-w-full">
+            {/* Team header — sticky over the rounds as they scroll under it. */}
+            <div ref={headerRef} role="row" className="sticky top-0 z-10 flex gap-1.5 bg-bg pb-2">
+              {columns.map((c) => {
+                const mine = c.id === myColumnId;
+                return (
+                  <div
+                    key={c.id}
+                    role="columnheader"
+                    className={[
+                      CELL_WIDTH,
+                      'flex flex-col items-center gap-1 rounded-card-sm px-1.5 pt-1.5 pb-1.5 transition-colors duration-200',
+                      c.lit ? 'bg-accent/15 ring-1 ring-inset ring-accent/60' : '',
+                    ].join(' ')}
+                  >
+                    {c.badge ? (
+                      <span
+                        className={[
+                          'inline-flex items-center justify-center min-w-8 h-8 lg:min-w-9 lg:h-9 px-1.5 rounded-full',
+                          'font-tight text-[11px] lg:text-[12px] font-extrabold tabular',
+                          c.lit ? 'bg-accent text-accent-ink' : 'bg-ink/15 text-ink',
+                        ].join(' ')}
+                      >
+                        {c.badge}
+                      </span>
+                    ) : (
+                      <TeamAvatar id={c.id} name={c.name} />
+                    )}
+                    <span className="flex items-center gap-1 max-w-full min-w-0">
+                      <span
+                        className={[
+                          'font-tight text-[11px] lg:text-[12px] truncate',
+                          mine ? 'font-extrabold text-ink' : 'font-semibold text-muted',
+                        ].join(' ')}
+                      >
+                        {c.name}
+                      </span>
+                      {c.auto && <AutoBadge />}
+                    </span>
+                    {c.detail && <div className="w-full font-tight text-[10.5px] text-muted tabular">{c.detail}</div>}
+                    {mine && <span aria-hidden="true" className="h-[3px] w-6 rounded-full bg-accent" />}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              {Array.from({ length: rows }, (_, row) => (
+                <div key={row} role="row" className="flex gap-1.5">
+                  {columns.map((c, col) => {
+                    const turn = arrows && row < rows - 1 && (row % 2 === 0 ? col === n - 1 : col === 0);
+                    const dir: ArrowDir | null = !arrows ? null : turn ? 'down' : row % 2 === 0 ? 'right' : 'left';
+                    return (
+                      <Cell
+                        key={c.id}
+                        dataCell={`${row}:${col}`}
+                        cell={cellAt(row, col)}
+                        teamName={c.name}
+                        mine={c.id === myColumnId}
+                        dir={dir}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -439,7 +433,7 @@ function StopwatchIcon() {
   );
 }
 
-function CrosshairIcon() {
+export function CrosshairIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.6" />

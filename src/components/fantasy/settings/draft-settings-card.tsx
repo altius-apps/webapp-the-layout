@@ -12,12 +12,8 @@
 // Team-count gating: the RPC itself refuses to schedule below minTeams, so we
 // mirror that client-side (disable Schedule + show the note) rather than
 // letting the request round-trip to fail.
-//
-// DEVIATION from mobile: mobile composes the date/time from two PillSelects
-// (RN has no native date input). Web has <input type="datetime-local">, so
-// we use that directly instead of porting the composite picker.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   DRAFT_CLOCK_SECONDS,
@@ -30,8 +26,8 @@ import {
 } from '@/lib/fantasy/draft-room';
 import type { ContestView } from '@/lib/fantasy/leagues';
 import { teamSize } from '@/lib/fantasy/competitions';
-import { PillSelect } from '@/components/pill-select';
-import { Card, SaveButton, Feedback, NumberField, ToggleSwitch, isoToLocalInput, localInputToIso } from './shared';
+import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { Card, SaveButton, Feedback, NumberField, ToggleSwitch } from './shared';
 
 interface Props {
   contest: ContestView;
@@ -366,6 +362,41 @@ function PillField({
   );
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_WINDOW_DAYS = 60;
+
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function startOfDay(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+function dayLabel(d: Date): string {
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function timeLabel(minutesOfDay: number): string {
+  const h = Math.floor(minutesOfDay / 60);
+  const m = minutesOfDay % 60;
+  const period = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function composeLocal(day: string, minutes: number): Date {
+  const [y, mo, da] = day.split('-').map(Number);
+  return new Date(y, mo - 1, da, Math.floor(minutes / 60), minutes % 60, 0, 0);
+}
+
+/** Day + time picker from two PillSelects, 1:1 with mobile's DateTimeField —
+ *  the native datetime-local popup can't take our styling (Hunter, 2026-10-12).
+ *  Days run max(today, min) → (max ?? +60 days); times are 30-minute steps in
+ *  the viewer's local day, disabled outside [max(now, min), max] on the chosen
+ *  day. Composing a local day + time → ISO, so the saved instant is UTC. */
 function DateTimeField({
   label,
   value,
@@ -379,25 +410,64 @@ function DateTimeField({
   min: string | null;
   max: string | null;
 }) {
-  const id = `dt-${label.replace(/\s+/g, '-').toLowerCase()}`;
+  const now = useMemo(() => new Date(), []);
+  const floorMs = Math.max(now.getTime(), min ? new Date(min).getTime() : 0);
+  const ceilMs = max ? new Date(max).getTime() : null;
+
+  const dayOptions = useMemo(() => {
+    const last = startOfDay(ceilMs != null ? new Date(ceilMs) : new Date(now.getTime() + DEFAULT_WINDOW_DAYS * DAY_MS));
+    const days: PillSelectOption<string>[] = [];
+    let cursor = startOfDay(new Date(floorMs));
+    while (cursor.getTime() <= last.getTime() && days.length < 366) {
+      days.push({ value: dayKey(cursor), label: dayLabel(cursor) });
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+    }
+    return days;
+  }, [floorMs, ceilMs, now]);
+
+  const parsed = value ? new Date(value) : null;
+  const selectedDay = parsed ? dayKey(parsed) : dayOptions[0]?.value ?? dayKey(new Date(floorMs));
+  const selectedMinutes = parsed ? parsed.getHours() * 60 + parsed.getMinutes() : 20 * 60; // default 8 PM
+
+  // A saved day before the window (or a saved off-step time like 7:40 PM) stays
+  // listed, so the pill shows it instead of PillSelect's first-option fallback.
+  const days = dayOptions.some((d) => d.value === selectedDay)
+    ? dayOptions
+    : [{ value: selectedDay, label: dayLabel(composeLocal(selectedDay, 0)) }, ...dayOptions];
+
+  const timeOptions = useMemo(() => {
+    const steps = Array.from({ length: 48 }, (_, i) => i * 30);
+    if (!steps.includes(selectedMinutes)) steps.push(selectedMinutes);
+    return steps
+      .sort((a, b) => a - b)
+      .map((m): PillSelectOption<number> => {
+        const t = composeLocal(selectedDay, m).getTime();
+        return { value: m, label: timeLabel(m), disabled: t < floorMs || (ceilMs != null && t > ceilMs) };
+      });
+  }, [selectedDay, selectedMinutes, floorMs, ceilMs]);
+
   return (
     <div>
-      <label htmlFor={id} className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
+      <span className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
         {label}
-      </label>
-      <input
-        id={id}
-        type="datetime-local"
-        value={isoToLocalInput(value)}
-        min={min ? isoToLocalInput(min) : undefined}
-        max={max ? isoToLocalInput(max) : undefined}
-        onChange={(e) => onChange(localInputToIso(e.target.value))}
-        className={[
-          'px-3.5 py-2.5 rounded-card-sm bg-ink/5',
-          'font-tight text-[14px] text-ink',
-          'focus:outline-none focus:ring-2 focus:ring-accent min-h-[44px]',
-        ].join(' ')}
-      />
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <PillSelect
+          value={selectedDay}
+          options={days}
+          onChange={(day) => onChange(composeLocal(day, selectedMinutes).toISOString())}
+          ariaLabel={`${label} day`}
+        />
+        <PillSelect
+          value={selectedMinutes}
+          options={timeOptions}
+          onChange={(m) => onChange(composeLocal(selectedDay, m).toISOString())}
+          ariaLabel={`${label} time`}
+        />
+      </div>
+      <p className="mt-2 font-tight text-[12.5px] font-medium text-muted">
+        {parsed ? `${dayLabel(parsed)} · ${timeLabel(selectedMinutes)}` : 'Not set'}
+      </p>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 // LimitsCard — Settings → Teams. Commissioner-only team cap: a stepper through
-// TEAM_LIMIT_STOPS (4–16, then ∞ = unlimited) for every competition (web port
+// TEAM_LIMIT_STOPS (2–16, then ∞ = unlimited) for every competition (web port
 // of mobile's LimitsCard.tsx). Mirrors NameCard/RosterCard's save/dirty/Feedback
 // shape so the whole Settings screen reads as one system. stepTeams +
 // StepButton are shared with Create a League's Total teams.

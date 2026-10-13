@@ -18,6 +18,7 @@ import { AppRail } from '@/components/app-rail';
 import { SectionNavForRoute } from '@/components/games-subnav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 import { SiteFooter } from '@/components/site-footer';
+import { isDraftRoomPath } from '@/lib/fantasy/draft-route';
 
 // Hooks like useSearchParams() must be wrapped in Suspense for Next 14
 // static prerendering — otherwise the whole tree falls back to CSR and
@@ -59,13 +60,12 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
     <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
   ) : null;
 
-  // The app scrolls in these nested panes, not the body, so browser scroll
+  // The app scrolls in this nested pane, not the body, so browser scroll
   // restoration never applies — back-nav landed at the top of every page.
-  // These save/restore each pane's position across back/forward.
-  const mobilePaneRef = useRef<HTMLDivElement>(null);
-  const desktopPaneRef = useRef<HTMLElement>(null);
-  usePaneScrollRestoration(mobilePaneRef, 'm');
-  usePaneScrollRestoration(desktopPaneRef, 'd');
+  // This saves/restores the pane's position across back/forward.
+  const paneRef = useRef<HTMLElement>(null);
+  usePaneScrollRestoration(paneRef, 'pane');
+  const showFooter = !isDraftRoomPath(usePathname() ?? '');
 
   return (
     // h-screen + flex-col: AppRail (flex-shrink-0, now the only chrome bar)
@@ -90,27 +90,27 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
           panes so it stays pinned under the rail. ── */}
       <SectionNavForRoute />
 
-      {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
-          sits above the bottom nav's reserved space. The bar is flat and
-          edge-to-edge: 58px of tabs sitting on top of the safe-area inset, so
-          clearance is exactly that plus a little breathing room. */}
-      <div
-        ref={mobilePaneRef}
-        className="lg:hidden flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+70px)]"
+      {/* ── One scroll pane for every breakpoint, so `children` mount ONCE.
+          (It used to be a phone pane plus a desktop pane, which mounted every
+          page twice: doubled fetches, racing inserts, and a second realtime
+          subscribe that cut the visible copy's channel.)
+          Phones (<lg): SiteFooter scrolls up from below the content and sits
+          above the bottom nav's reserved space. The bar is flat and
+          edge-to-edge: 58px of tabs on top of the safe-area inset, so
+          clearance is exactly that plus a little breathing room.
+          Desktop (lg+): no sidebar and no bottom bar, so content goes
+          full-width and the footer sits at the bottom of short pages. ── */}
+      <main
+        ref={paneRef}
+        className="flex-1 min-h-0 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+70px)] lg:flex lg:flex-col lg:pb-14"
       >
-        {children}
-        {!hideFooterMobile && <SiteFooter />}
-      </div>
-
-      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The bottom bar
-          is mobile-only now (MobileBottomNav is lg:hidden), so desktop needs no
-          floating-bar clearance — content flows straight into the footer. ── */}
-      <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <main ref={desktopPaneRef} className="flex-1 overflow-y-auto flex flex-col pb-14">
-          <div className="flex-1">{children}</div>
-          <SiteFooter />
-        </main>
-      </div>
+        <div className="lg:flex-1">{children}</div>
+        {showFooter && (
+          <div className={hideFooterMobile ? 'hidden lg:block' : undefined}>
+            <SiteFooter />
+          </div>
+        )}
+      </main>
 
       {/* The global static bottom bar (MobileBottomNav) is mounted ONCE at the
           root layout now (app/layout.tsx), so it's app-wide regardless of shell
@@ -216,12 +216,8 @@ export function PageShell({
   );
 }
 
-// AppShell renders `children` twice (once per breakpoint's scroll pane), so a
-// single ref/state pair in PageShell can only ever attach to one of the two
-// mounted copies — whichever wins is effectively random, and the desktop copy
-// (permanently `lg:hidden`, zero-size) breaks the observer if it wins. Each of
-// these renders as its own self-contained instance instead, so both the
-// mobile and desktop copies work correctly independently.
+// The bar finds its sentinel and scroll pane from its own DOM position, so it
+// needs no ref threaded through PageShell.
 const STICKY_NAME_ID = 'page-shell-sticky-sentinel';
 
 function StickySentinel() {
@@ -235,8 +231,7 @@ function StickyName({ name }: { name: string }) {
   useEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
-    // The sentinel is a sibling further down this same subtree — find it
-    // within this instance's own DOM branch, not the other breakpoint's copy.
+    // The sentinel is a sibling further down this same subtree.
     const el = bar.parentElement?.querySelector<HTMLDivElement>(`#${STICKY_NAME_ID}`);
     if (!el) return;
     const root = bar.closest('.overflow-y-auto');

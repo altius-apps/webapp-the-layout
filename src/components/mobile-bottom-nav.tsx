@@ -23,6 +23,7 @@
 
 import { usePathname } from 'next/navigation';
 import { FloatingTabBar, type FloatingTab } from '@/components/floating-tab-bar';
+import { isDraftRoomPath } from '@/lib/fantasy/draft-route';
 
 type TabId = 'home' | 'leagues' | 'playbook' | 'fantasy' | 'foryou';
 type IconKind = 'home' | 'leagues' | 'playbook' | 'fantasy' | 'foryou';
@@ -62,6 +63,8 @@ function activeTab(pathname: string): TabId | null {
 export function MobileBottomNav() {
   const pathname = usePathname() ?? '/';
   const active = activeTab(pathname);
+  // The draft room runs to the bottom of the screen; its X is the way out.
+  if (isDraftRoomPath(pathname)) return null;
 
   const bars: FloatingTab[] = TABS.map((tab) => ({
     id: tab.id,
