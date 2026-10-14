@@ -1,19 +1,20 @@
 'use client';
 
 // ESPN-style standings for official leagues: rank across the whole field, the
-// viewer's own row pinned on top, top 100 then "Show more". Pages come from the
-// server-cached leaderboard (60 s) and are fetched once per mount/page.
+// viewer's own row pinned on top, top 100 then "Show more". Each page is
+// fetched once per mount/page with the viewer's session (league data is
+// signed-in only, so it can't sit in a shared server cache).
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import {
+  getContestLeaderboard,
   getContestTeamRank,
   getMyContestTeam,
   topPercent,
   type LeaderboardEntry,
 } from '@/lib/fantasy/leagues';
-import { fetchLeaderboardPage } from '@/app/fantasy/leaderboard-actions';
 
 const PAGE_SIZE = 100;
 
@@ -37,7 +38,7 @@ export function OfficialStandings({ contestId }: { contestId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchLeaderboardPage(contestId, 0)
+    getContestLeaderboard(contestId, PAGE_SIZE, 0)
       .then((rows) => {
         if (cancelled) return;
         setEntries(rows);
@@ -71,7 +72,7 @@ export function OfficialStandings({ contestId }: { contestId: string }) {
   const showMore = async () => {
     setLoadingMore(true);
     try {
-      const next = await fetchLeaderboardPage(contestId, page + 1);
+      const next = await getContestLeaderboard(contestId, PAGE_SIZE, (page + 1) * PAGE_SIZE);
       setEntries((prev) => [...prev, ...next]);
       setPage(page + 1);
       setHasMore(next.length === PAGE_SIZE);

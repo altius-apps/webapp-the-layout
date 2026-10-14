@@ -20,6 +20,8 @@ import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
 import { LeagueChrome } from '@/components/fantasy/league-chrome';
 import { EnsureContestTeam } from '@/components/fantasy/ensure-contest-team';
 import { LeagueContentFrame } from '@/components/fantasy/league-content-frame';
+import { FantasySignInGate } from '@/components/fantasy/fantasy-sign-in-gate';
+import { getServerUserId } from '@/lib/fantasy/server';
 
 export default async function LeagueLayout({
   children,
@@ -28,6 +30,10 @@ export default async function LeagueLayout({
   children: React.ReactNode;
   params: { contestId: string };
 }) {
+  // Leagues are signed-in only (RLS backs this up).
+  const userId = await getServerUserId().catch(() => null);
+  if (!userId) return <FantasySignInGate />;
+
   const contest = await getContest(params.contestId).catch(() => null);
 
   if (!contest) {

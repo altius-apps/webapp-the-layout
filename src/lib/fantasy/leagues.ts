@@ -16,6 +16,7 @@ import { createClient as createSessionClient } from '@/lib/supabase/client';
 import { createClient as createAnonClient, isAuthSessionMissingError, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { moderateName } from '@/lib/moderation';
+import { leagueReader } from './reader';
 import { usauToday } from '@/lib/today';
 import { roundPoints } from './scoring';
 import {
@@ -120,7 +121,7 @@ function mapContestRow(r: Record<string, unknown>): ContestView | null {
 
 /** One league's header info. Public read (invite code is column-locked). */
 export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary | null> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_leagues')
     .select('id, name, owner_id, created_at, logo_url, logo_icon, is_public, is_official')
     .eq('id', leagueId)
@@ -129,8 +130,8 @@ export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary 
   if (!data) return null;
 
   const [{ count: members }, { count: contests }] = await Promise.all([
-    anon().from('fantasy_league_members').select('user_id', { count: 'exact', head: true }).eq('league_id', leagueId),
-    anon().from('fantasy_contests').select('id', { count: 'exact', head: true }).eq('league_id', leagueId),
+    leagueReader().from('fantasy_league_members').select('user_id', { count: 'exact', head: true }).eq('league_id', leagueId),
+    leagueReader().from('fantasy_contests').select('id', { count: 'exact', head: true }).eq('league_id', leagueId),
   ]);
 
   return {
@@ -151,7 +152,7 @@ export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary 
 /** All members of a league with their public identity (denormalized), or
  *  just `userIds` — an official league is too big to list whole. */
 export async function getLeagueMembers(leagueId: string, userIds?: string[]): Promise<LeagueMember[]> {
-  let q = anon()
+  let q = leagueReader()
     .from('fantasy_league_members')
     .select('user_id, role, member_display_name, member_username, joined_at')
     .eq('league_id', leagueId);
@@ -169,7 +170,7 @@ export async function getLeagueMembers(leagueId: string, userIds?: string[]): Pr
 
 /** A league's contests, newest first. */
 export async function getLeagueContests(leagueId: string): Promise<ContestView[]> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_contests')
     .select('id, league_id, competition, season_year, name, status, settings, created_at')
     .eq('league_id', leagueId)
@@ -181,7 +182,7 @@ export async function getLeagueContests(leagueId: string): Promise<ContestView[]
 }
 
 export async function getContest(contestId: string): Promise<ContestView | null> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_contests')
     .select('id, league_id, competition, season_year, name, status, settings, created_at')
     .eq('id', contestId)
@@ -192,7 +193,7 @@ export async function getContest(contestId: string): Promise<ContestView | null>
 
 /** The lock schedule for a contest, from the DB lock authority table. */
 export async function getContestPeriods(contestId: string): Promise<ContestPeriod[]> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_contest_periods')
     .select('period, lock_at, unlock_at, game_count, complete')
     .eq('contest_id', contestId)
@@ -228,7 +229,7 @@ export function periodsToWeeks(periods: ContestPeriod[], now: Date = new Date())
 
 /** Contest standings = every team in the contest ranked by summed scores. */
 export async function getContestStandings(contestId: string): Promise<LeaderboardRow[]> {
-  const { data: teams, error } = await anon()
+  const { data: teams, error } = await leagueReader()
     .from('fantasy_teams')
     .select('id, team_name, owner_id, owner_display_name, owner_username')
     .eq('contest_id', contestId)
@@ -237,7 +238,7 @@ export async function getContestStandings(contestId: string): Promise<Leaderboar
   if (!teams || teams.length === 0) return [];
 
   const ids = teams.map((t: Record<string, unknown>) => t.id as string);
-  const { data: scores } = await anon()
+  const { data: scores } = await leagueReader()
     .from('fantasy_scores')
     .select('team_id, points')
     .in('team_id', ids);
@@ -290,7 +291,7 @@ export interface ContestTeamView {
 /** A team's header + per-period totals, scoped to its contest (any
  *  competition). Used by the public contest-scoped team view. */
 export async function getContestTeam(teamId: string): Promise<ContestTeamView | null> {
-  const { data: team, error } = await anon()
+  const { data: team, error } = await leagueReader()
     .from('fantasy_teams')
     .select('id, contest_id, team_name, owner_id, owner_display_name, owner_username')
     .eq('id', teamId)
@@ -298,7 +299,7 @@ export async function getContestTeam(teamId: string): Promise<ContestTeamView | 
   if (error) throw new Error(error.message);
   if (!team) return null;
 
-  const { data: scores } = await anon()
+  const { data: scores } = await leagueReader()
     .from('fantasy_scores')
     .select('week, points')
     .eq('team_id', teamId);
@@ -479,10 +480,10 @@ export interface PublicLeagueRow {
   open: boolean;
 }
 
-/** Public leagues with a contest still in play — anon read, so pages cache it
- *  (see public-leagues-cached.ts); never a per-user read. */
+/** Public leagues with a contest still in play (signed-in only; the hub loads
+ *  it client-side so the page stays ISR). */
 export async function getPublicLeagues(limit = 50): Promise<PublicLeagueRow[]> {
-  const { data, error } = await anon().rpc('fantasy_public_leagues', { p_limit: limit });
+  const { data, error } = await leagueReader().rpc('fantasy_public_leagues', { p_limit: limit });
   if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[])
     .map((r): PublicLeagueRow | null => {
@@ -538,7 +539,7 @@ export interface LeaderboardEntry {
 
 /** A page of a contest's standings by total points (max 200 per page). */
 export async function getContestLeaderboard(contestId: string, limit = 100, offset = 0): Promise<LeaderboardEntry[]> {
-  const { data, error } = await anon().rpc('fantasy_contest_leaderboard', {
+  const { data, error } = await leagueReader().rpc('fantasy_contest_leaderboard', {
     p_contest: contestId,
     p_limit: limit,
     p_offset: offset,
@@ -560,7 +561,7 @@ export async function getContestLeaderboard(contestId: string, limit = 100, offs
 export async function getContestTeamRank(
   teamId: string,
 ): Promise<{ rank: number; totalTeams: number; totalPoints: number } | null> {
-  const { data, error } = await anon().rpc('fantasy_contest_team_rank', { p_team: teamId });
+  const { data, error } = await leagueReader().rpc('fantasy_contest_team_rank', { p_team: teamId });
   if (error) throw new Error(error.message);
   const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
   if (!row) return null;
@@ -576,7 +577,7 @@ export function topPercent(rank: number, totalTeams: number): number {
 /** Share of teams rostering each player in one period, keyed
  *  `${player_league}:${player_id}` → percent (0–100, one decimal). */
 export async function getRosteredPct(contestId: string, period: string): Promise<Map<string, number>> {
-  const { data, error } = await anon().rpc('fantasy_contest_roster_pct', { p_contest: contestId, p_period: period });
+  const { data, error } = await leagueReader().rpc('fantasy_contest_roster_pct', { p_contest: contestId, p_period: period });
   if (error) throw new Error(error.message);
   return new Map(
     ((data ?? []) as Record<string, unknown>[]).map((r) => [`${r.player_league}:${r.player_id}`, Number(r.pct ?? 0)]),
@@ -1115,7 +1116,7 @@ function mapMatchup(r: Record<string, unknown>): Matchup {
 
 /** A contest's H2H matchups, optionally scoped to one period. Public read. */
 export async function getMatchups(contestId: string, period?: string): Promise<Matchup[]> {
-  let q = anon()
+  let q = leagueReader()
     .from('fantasy_matchups')
     .select('id, contest_id, period, stage, home_team_id, away_team_id, home_seed, away_seed, home_points, away_points, winner_team_id, scored')
     .eq('contest_id', contestId)
@@ -1129,7 +1130,7 @@ export async function getMatchups(contestId: string, period?: string): Promise<M
 /** H2H standings for a contest (wins/losses/ties, points for/against, rank).
  *  Public read. */
 export async function getH2HStandings(contestId: string): Promise<H2HStandingRow[]> {
-  const { data, error } = await anon().rpc('fantasy_h2h_standings', { p_contest: contestId });
+  const { data, error } = await leagueReader().rpc('fantasy_h2h_standings', { p_contest: contestId });
   if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     teamId: r.team_id as string,
@@ -1171,7 +1172,7 @@ function mapTeamPlayer(r: Record<string, unknown>): TeamPlayer {
 
 /** A contest's ownership ledger (or one team's slice of it). Public read. */
 export async function getTeamPlayers(contestId: string, teamId?: string): Promise<TeamPlayer[]> {
-  let q = anon()
+  let q = leagueReader()
     .from('fantasy_team_players')
     .select('contest_id, team_id, player_league, player_id, player_name, acquired_via, price, acquired_at')
     .eq('contest_id', contestId);
@@ -1213,7 +1214,7 @@ export interface TeamTransaction {
 /** One team's adds, drops, waiver claims and trade legs, newest first. Public
  *  read, so the team profile works signed out. */
 export async function getTeamTransactions(contestId: string, teamId: string, limit = 20): Promise<TeamTransaction[]> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_transactions')
     .select('id, kind, added_name, dropped_name, created_at')
     .eq('contest_id', contestId)
@@ -1354,7 +1355,7 @@ export async function setWaiverSettings(contestId: string, mode: WaiverMode, bud
 
 /** Public: players currently inside their waiver window. */
 export async function getWaiverPlayers(contestId: string): Promise<WaiverPlayer[]> {
-  const { data, error } = await anon().from('fantasy_waiver_players').select('*').eq('contest_id', contestId).limit(500);
+  const { data, error } = await leagueReader().from('fantasy_waiver_players').select('*').eq('contest_id', contestId).limit(500);
   if (error) throw new Error(error.message);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     contestId: r.contest_id as string,
@@ -1389,7 +1390,7 @@ export async function getWaiverClaims(contestId: string): Promise<WaiverClaim[]>
 
 /** FAAB dollars already spent by a team. */
 export async function getFaabSpent(contestId: string, teamId: string): Promise<number> {
-  const { data, error } = await anon().rpc('fantasy_faab_spent', { p_contest: contestId, p_team: teamId });
+  const { data, error } = await leagueReader().rpc('fantasy_faab_spent', { p_contest: contestId, p_team: teamId });
   if (error) throw new Error(error.message);
   return Number(data ?? 0);
 }

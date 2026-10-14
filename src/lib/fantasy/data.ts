@@ -10,6 +10,7 @@
 // cast rows via local interfaces.
 
 import { createClient as createSessionClient } from '@/lib/supabase/client';
+import { leagueReader } from './reader';
 import { createClient as createAnonClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { scoreStatLine, roundPoints, type FantasyRole } from './scoring';
@@ -87,7 +88,7 @@ export interface LeaderboardRow {
 
 /** Roster slots for a team + week, joined to player/team names. */
 export async function getTeamRoster(teamId: string, week: string): Promise<RosterSlot[]> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_roster_slots')
     .select('player_id, role, ufa_players:player_id (full_name, current_team_id, ufa_teams:current_team_id (name, full_name))')
     .eq('team_id', teamId)

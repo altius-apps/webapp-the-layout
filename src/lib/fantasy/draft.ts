@@ -16,6 +16,7 @@
 // trigger). The client check here exists only for a friendly error message.
 
 import { createClient as createSessionClient } from '@/lib/supabase/client';
+import { leagueReader } from './reader';
 import { createClient as createAnonClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { scoreStatLine, roundPoints, type FantasyRole } from './scoring';
@@ -265,7 +266,7 @@ export async function getContestTeamRoster(
   teamId: string,
   period: string,
 ): Promise<ContestRosterSlot[]> {
-  const { data, error } = await anon()
+  const { data, error } = await leagueReader()
     .from('fantasy_roster_slots')
     .select('player_id, player_league, role')
     .eq('team_id', teamId)

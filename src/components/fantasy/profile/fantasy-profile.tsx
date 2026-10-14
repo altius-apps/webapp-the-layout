@@ -25,7 +25,7 @@ import {
   type TeamTransaction,
 } from '@/lib/fantasy/leagues';
 import { getContestTeamRoster, type ContestRosterSlot } from '@/lib/fantasy/draft';
-import { getDraftStatusPublic } from '@/lib/fantasy/server';
+import { getDraftStatusServer } from '@/lib/fantasy/server';
 import { contestFormat } from '@/lib/fantasy/competitions';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import { ordinal } from '@/lib/bracket-tree';
@@ -47,8 +47,8 @@ export async function FantasyProfile({ contest, teamId }: { contest: ContestView
     isH2H ? getH2HStandings(contest.id).catch(() => []) : Promise.resolve([]),
     isH2H ? getMatchups(contest.id).catch(() => []) : Promise.resolve([]),
     !isEvent && isDrafted
-      ? getDraftStatusPublic(contest.id).catch((err) => {
-          console.error('[fantasy profile] getDraftStatusPublic failed', err);
+      ? getDraftStatusServer(contest.id).catch((err) => {
+          console.error('[fantasy profile] getDraftStatusServer failed', err);
           return null;
         })
       : Promise.resolve(null),

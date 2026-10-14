@@ -1,8 +1,13 @@
-// "Public" — the fantasy hub's open-leagues section. Server Component reading
-// the cached public-leagues list (never a per-request query); the rows and
-// the competition filter live in the PublicLeaguesRows client island.
+'use client';
 
-import { getPublicLeaguesCached } from '@/lib/fantasy/public-leagues-cached';
+// "Public" — the fantasy hub's open-leagues section. Signed-in only (Hunter,
+// 2026-10-14: signed-out users don't see fantasy leagues), so it loads in the
+// browser with the viewer's session and the hub page itself stays ISR. The
+// rows and the competition filter live in PublicLeaguesRows.
+
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { getPublicLeagues } from '@/lib/fantasy/leagues';
 import { getGame } from '@/lib/fantasy/games';
 import {
   PublicLeaguesRows,
@@ -17,24 +22,43 @@ function lockLabel(iso: string | null): string {
   return `Locks ${day}`;
 }
 
-export async function PublicLeaguesList() {
-  const leagues = await getPublicLeaguesCached().catch(() => []);
-  if (leagues.length === 0) return null;
+export function PublicLeaguesList() {
+  const { user } = useAuth();
+  const [rows, setRows] = useState<PublicLeagueView[]>([]);
 
-  const rows: PublicLeagueView[] = leagues.map((l) => ({
-    leagueId: l.leagueId,
-    contestId: l.contestId,
-    name: l.name,
-    logoUrl: l.logoUrl,
-    logoIcon: l.logoIcon,
-    logoSrc: getGame(l.competition)?.logoSrc ?? null,
-    isOfficial: l.isOfficial,
-    open: l.open,
-    competition: l.competition,
-    competitionLabel: l.competitionDef.shortLabel,
-    memberCount: l.memberCount,
-    lockLabel: lockLabel(l.nextLockAt),
-  }));
+  useEffect(() => {
+    if (!user) {
+      setRows([]);
+      return;
+    }
+    let cancelled = false;
+    getPublicLeagues()
+      .then((leagues) => {
+        if (cancelled) return;
+        setRows(
+          leagues.map((l) => ({
+            leagueId: l.leagueId,
+            contestId: l.contestId,
+            name: l.name,
+            logoUrl: l.logoUrl,
+            logoIcon: l.logoIcon,
+            logoSrc: getGame(l.competition)?.logoSrc ?? null,
+            isOfficial: l.isOfficial,
+            open: l.open,
+            competition: l.competition,
+            competitionLabel: l.competitionDef.shortLabel,
+            memberCount: l.memberCount,
+            lockLabel: lockLabel(l.nextLockAt),
+          })),
+        );
+      })
+      .catch(() => !cancelled && setRows([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  if (rows.length === 0) return null;
 
   return (
     <section aria-labelledby="public-leagues-heading" className="mb-8 lg:mb-10">

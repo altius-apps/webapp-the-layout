@@ -7,13 +7,14 @@ import 'server-only';
 // that export is a client reference, so calling it throws — and the pages'
 // .catch(() => null) turns that into "no draft" / "no team". These read
 // through the cookie-aware SERVER client instead, which also carries the
-// signed-in user's session for the per-user team lookup. The *Public reads
-// use a cookie-free anon client so cached (revalidate) routes stay static.
+// signed-in user's session for the per-user team lookup. Importing this module
+// also registers the session reader leagues.ts uses on the server: league data
+// is signed-in only (reader.ts).
 
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
-import { createClient as createAnonClient, type SupabaseClient } from '@supabase/supabase-js';
-import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DraftStatus } from './draft-room';
+import { registerServerReader } from './reader';
 
 // fantasy_* tables aren't in the generated database.types.ts (repo
 // convention), so loosen .from() only; auth stays typed.
@@ -27,30 +28,20 @@ function serverDb() {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
 
-let _anon: AnyClient | null = null;
-function anon(): AnyClient {
-  if (_anon) return _anon;
-  _anon = createAnonClient(supabaseUrl(), supabaseAnonKey(), {
-    auth: { persistSession: false },
-  });
-  return _anon;
+registerServerReader(() => createServerSupabase() as unknown as AnyClient);
+
+/** The signed-in user, or null — the league layout's sign-in gate. */
+export async function getServerUserId(): Promise<string | null> {
+  const {
+    data: { user },
+  } = await createServerSupabase().auth.getUser();
+  return user?.id ?? null;
 }
 
 /** The contest's draft status, or null when none is scheduled. Public read. */
 export async function getDraftStatusServer(contestId: string): Promise<DraftStatus | null> {
   const { db } = serverDb();
   const { data, error } = await db
-    .from('fantasy_drafts')
-    .select('status')
-    .eq('contest_id', contestId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data ? (data.status as DraftStatus) : null;
-}
-
-/** getDraftStatusServer without cookies, for cached routes. Public read. */
-export async function getDraftStatusPublic(contestId: string): Promise<DraftStatus | null> {
-  const { data, error } = await anon()
     .from('fantasy_drafts')
     .select('status')
     .eq('contest_id', contestId)
