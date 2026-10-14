@@ -3,11 +3,11 @@
 // DraftSettingsCard — Settings → Draft. Three states, web port of mobile's
 // DraftSettingsCard.tsx:
 //   1. No draft yet   — commissioner configures type + settings + a time at
-//      least 30 minutes out (no manual start — Hunter, 2026-10-13), then
+//      least 15 minutes out (no manual start — Hunter, 2026-10-13; 15 since 10-14), then
 //      schedules it (scheduleDraft / scheduleAuctionDraft).
 //   2. Scheduled      — read-only summary + a reschedule form. A MISSED
 //      draft (readiness.missed) shows a banner and the reschedule floor
-//      shifts to originalScheduledAt + 1 day when missed, else now + 30 min (readiness.rescheduleFloor).
+//      shifts to originalScheduledAt + 1 day when missed, else now + 15 min (readiness.rescheduleFloor).
 //      Both pickers open on the first half-hour slot past the floor, not the
 //      floor itself: the RPC re-takes now() on submit.
 //   3. Live / complete — read-only summary + a link into the draft room.
@@ -111,7 +111,7 @@ function ScheduleForm({
     if (!canSchedule || !at) return;
     // The picker's times were set when the form opened; the notice counts from now.
     if (new Date(at).getTime() < Date.now() + NOTICE_MS) {
-      setError("Give the league at least 30 minutes' notice — pick a later time.");
+      setError("Give the league at least 15 minutes' notice — pick a later time.");
       return;
     }
     setSaving(true);
@@ -173,7 +173,7 @@ function ScheduleForm({
         )}
 
         <p className="font-tight text-[12px] text-muted leading-snug">
-          Give the league at least 30 minutes&apos; notice.
+          Give the league at least 15 minutes&apos; notice.
         </p>
 
         <DateTimeField label="Draft time" value={at} onChange={setAt} min={floor} max={readiness.lockAt} />
@@ -228,14 +228,18 @@ function ScheduledView({
   const [at, setAt] = useState<string | null>(() => startAt(draft.scheduledAt, rescheduleFloor));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The time just saved, for the confirmation; cleared once the picker changes.
+  const [changedTo, setChangedTo] = useState<string | null>(null);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!at || saving) return;
     setSaving(true);
     setError(null);
+    setChangedTo(null);
     try {
       await rescheduleDraft(draft.id, at);
+      setChangedTo(at);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reschedule the draft.');
@@ -265,12 +269,21 @@ function ScheduledView({
 
         {!readiness.missed && (
           <p className="font-tight text-[12px] text-muted leading-snug">
-            Give the league at least 30 minutes&apos; notice.
+            Give the league at least 15 minutes&apos; notice.
           </p>
         )}
 
         <form onSubmit={save} className="flex flex-col gap-4">
-          <DateTimeField label="Reschedule" value={at} onChange={setAt} min={rescheduleFloor} max={readiness.lockAt} />
+          <DateTimeField
+            label="Reschedule"
+            value={at}
+            onChange={(v) => {
+              setAt(v);
+              setChangedTo(null);
+            }}
+            min={rescheduleFloor}
+            max={readiness.lockAt}
+          />
           <div className="flex items-center justify-between gap-3">
             <Link
               href={`/fantasy/l/${contest.id}/draft`}
@@ -281,7 +294,11 @@ function ScheduledView({
             <SaveButton disabled={!at || saving} saving={saving} label="Reschedule" savingLabel="Saving…" />
           </div>
         </form>
-        <Feedback error={error} saved={false} />
+        <Feedback
+          error={error}
+          saved={changedTo != null}
+          savedText={`Draft time changed to ${formatScheduled(changedTo)}.`}
+        />
       </div>
     </Card>
   );
@@ -358,9 +375,9 @@ function PillField({
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_WINDOW_DAYS = 60;
-const NOTICE_MS = 30 * 60 * 1000;
+const NOTICE_MS = 15 * 60 * 1000;
 
-/** The earliest draft time: 30 minutes from now, or the window's start if later. */
+/** The earliest draft time: 15 minutes from now, or the window's start if later. */
 function noticeFloor(earliestAt: string | null): string {
   const ms = Math.max(Date.now() + NOTICE_MS, earliestAt ? new Date(earliestAt).getTime() : 0);
   return new Date(ms).toISOString();
@@ -386,12 +403,6 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function startOfDay(d: Date): Date {
-  const out = new Date(d);
-  out.setHours(0, 0, 0, 0);
-  return out;
-}
-
 function dayLabel(d: Date): string {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 }
@@ -409,11 +420,16 @@ function composeLocal(day: string, minutes: number): Date {
   return new Date(y, mo - 1, da, Math.floor(minutes / 60), minutes % 60, 0, 0);
 }
 
-/** Day + time picker from two PillSelects, 1:1 with mobile's DateTimeField —
- *  the native datetime-local popup can't take our styling (Hunter, 2026-10-12).
- *  Days run max(today, min) → (max ?? +60 days); times are 30-minute steps in
- *  the viewer's local day, disabled outside [max(now, min), max] on the chosen
- *  day. Composing a local day + time → ISO, so the saved instant is UTC. */
+const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const SLOTS = Array.from({ length: 48 }, (_, i) => i * 30);
+const DEFAULT_MINUTES = 20 * 60; // 8 PM
+
+/** Day + time picker: a month calendar with every day outside the window
+ *  blocked, then a 30-minute time PillSelect for the chosen day (Hunter,
+ *  2026-10-14; the native datetime-local popup can't take our styling). The
+ *  window is [max(now, min), max ?? +60 days] — a day is clickable while one of
+ *  its slots falls inside it. Times are the viewer's local day; the saved
+ *  instant is UTC. */
 function DateTimeField({
   label,
   value,
@@ -429,62 +445,157 @@ function DateTimeField({
 }) {
   const now = useMemo(() => new Date(), []);
   const floorMs = Math.max(now.getTime(), min ? new Date(min).getTime() : 0);
-  const ceilMs = max ? new Date(max).getTime() : null;
-
-  const dayOptions = useMemo(() => {
-    const last = startOfDay(ceilMs != null ? new Date(ceilMs) : new Date(now.getTime() + DEFAULT_WINDOW_DAYS * DAY_MS));
-    const days: PillSelectOption<string>[] = [];
-    let cursor = startOfDay(new Date(floorMs));
-    while (cursor.getTime() <= last.getTime() && days.length < 366) {
-      days.push({ value: dayKey(cursor), label: dayLabel(cursor) });
-      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
-    }
-    return days;
-  }, [floorMs, ceilMs, now]);
+  const ceilMs = max ? new Date(max).getTime() : now.getTime() + DEFAULT_WINDOW_DAYS * DAY_MS;
 
   const parsed = value ? new Date(value) : null;
-  const selectedDay = parsed ? dayKey(parsed) : dayOptions[0]?.value ?? dayKey(new Date(floorMs));
-  const selectedMinutes = parsed ? parsed.getHours() * 60 + parsed.getMinutes() : 20 * 60; // default 8 PM
+  const selectedDay = parsed ? dayKey(parsed) : null;
+  const selectedMinutes = parsed ? parsed.getHours() * 60 + parsed.getMinutes() : null;
 
-  // A saved day before the window (or a saved off-step time like 7:40 PM) stays
-  // listed, so the pill shows it instead of PillSelect's first-option fallback.
-  const days = dayOptions.some((d) => d.value === selectedDay)
-    ? dayOptions
-    : [{ value: selectedDay, label: dayLabel(composeLocal(selectedDay, 0)) }, ...dayOptions];
+  const openSlots = (day: string) =>
+    SLOTS.filter((m) => {
+      const t = composeLocal(day, m).getTime();
+      return t >= floorMs && t <= ceilMs;
+    });
+
+  const firstMonth = monthStart(new Date(floorMs));
+  const lastMonth = monthStart(new Date(ceilMs));
+  const [month, setMonth] = useState(() => monthStart(parsed ?? new Date(floorMs)));
+
+  const cells = useMemo(() => {
+    const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+    const days = Array.from({ length: count }, (_, i) => new Date(month.getFullYear(), month.getMonth(), i + 1));
+    return [...Array<null>(month.getDay()).fill(null), ...days];
+  }, [month]);
+
+  const openDays = useMemo(
+    () => new Set(cells.filter((d): d is Date => !!d && openSlots(dayKey(d)).length > 0).map(dayKey)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cells, floorMs, ceilMs],
+  );
+
+  // Keep the chosen time when the new day allows it, else 8 PM, else the day's first open slot.
+  const pickDay = (day: string) => {
+    const open = openSlots(day);
+    const m =
+      selectedMinutes != null && open.includes(selectedMinutes)
+        ? selectedMinutes
+        : open.includes(DEFAULT_MINUTES)
+          ? DEFAULT_MINUTES
+          : open[0];
+    onChange(composeLocal(day, m).toISOString());
+  };
 
   const timeOptions = useMemo(() => {
-    const steps = Array.from({ length: 48 }, (_, i) => i * 30);
-    if (!steps.includes(selectedMinutes)) steps.push(selectedMinutes);
+    if (!selectedDay) return [];
+    const steps = [...SLOTS];
+    // A saved off-step time (7:40 PM) stays listed so the pill shows it.
+    if (selectedMinutes != null && !steps.includes(selectedMinutes)) steps.push(selectedMinutes);
     return steps
       .sort((a, b) => a - b)
       .map((m): PillSelectOption<number> => {
         const t = composeLocal(selectedDay, m).getTime();
-        return { value: m, label: timeLabel(m), disabled: t < floorMs || (ceilMs != null && t > ceilMs) };
+        return { value: m, label: timeLabel(m), disabled: t < floorMs || t > ceilMs };
       });
   }, [selectedDay, selectedMinutes, floorMs, ceilMs]);
+
+  const todayKey = dayKey(now);
+  const canPrev = month.getTime() > firstMonth.getTime();
+  const canNext = month.getTime() < lastMonth.getTime();
 
   return (
     <div>
       <span className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
         {label}
       </span>
-      <div className="flex flex-wrap items-center gap-2">
-        <PillSelect
-          value={selectedDay}
-          options={days}
-          onChange={(day) => onChange(composeLocal(day, selectedMinutes).toISOString())}
-          ariaLabel={`${label} day`}
-        />
-        <PillSelect
-          value={selectedMinutes}
-          options={timeOptions}
-          onChange={(m) => onChange(composeLocal(selectedDay, m).toISOString())}
-          ariaLabel={`${label} time`}
-        />
+      <div className="max-w-[340px] rounded-card-sm border border-hairline p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <MonthButton dir="prev" disabled={!canPrev} onClick={() => setMonth(addMonths(month, -1))} />
+          <span className="font-tight text-[13.5px] font-bold text-ink" aria-live="polite">
+            {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+          </span>
+          <MonthButton dir="next" disabled={!canNext} onClick={() => setMonth(addMonths(month, 1))} />
+        </div>
+        <div className="grid grid-cols-7 gap-y-1 text-center">
+          {WEEKDAYS.map((w, i) => (
+            <span key={i} aria-hidden="true" className="pb-1 font-tight text-[10px] font-bold tracking-[0.14em] text-faint">
+              {w}
+            </span>
+          ))}
+          {cells.map((d, i) => {
+            if (!d) return <span key={`pad-${i}`} />;
+            const key = dayKey(d);
+            const open = openDays.has(key);
+            const selected = key === selectedDay;
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={!open}
+                aria-pressed={selected}
+                aria-label={dayLabel(d)}
+                onClick={() => pickDay(key)}
+                className={[
+                  'mx-auto flex h-10 w-10 items-center justify-center rounded-full font-tight text-[13px] tabular',
+                  'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  selected
+                    ? 'bg-accent text-accent-ink font-bold'
+                    : open
+                      ? 'text-ink font-semibold hover:bg-ink/[0.06] cursor-pointer'
+                      : 'text-faint opacity-40 cursor-not-allowed',
+                  key === todayKey && !selected ? 'ring-1 ring-inset ring-hairline' : '',
+                ].join(' ')}
+              >
+                {d.getDate()}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {selectedDay && selectedMinutes != null && (
+        <div className="mt-3">
+          <span className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
+            Time
+          </span>
+          <PillSelect
+            value={selectedMinutes}
+            options={timeOptions}
+            onChange={(m) => onChange(composeLocal(selectedDay, m).toISOString())}
+            ariaLabel={`${label} time`}
+          />
+        </div>
+      )}
       <p className="mt-2 font-tight text-[12.5px] font-medium text-muted">
-        {parsed ? `${dayLabel(parsed)} · ${timeLabel(selectedMinutes)}` : 'Not set'}
+        {parsed && selectedMinutes != null ? `${dayLabel(parsed)} · ${timeLabel(selectedMinutes)}` : 'Pick a day'}
       </p>
     </div>
+  );
+}
+
+function monthStart(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function addMonths(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
+}
+
+function MonthButton({ dir, disabled, onClick }: { dir: 'prev' | 'next'; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={dir === 'prev' ? 'Previous month' : 'Next month'}
+      className={[
+        'inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        disabled ? 'text-faint opacity-40 cursor-not-allowed' : 'text-ink hover:bg-ink/[0.06] cursor-pointer',
+      ].join(' ')}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={dir === 'prev' ? 'M15 18l-6-6 6-6' : 'M9 18l6-6-6-6'} />
+      </svg>
+    </button>
   );
 }

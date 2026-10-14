@@ -52,7 +52,7 @@ export function SaveButton({
   );
 }
 
-export function Feedback({ error, saved }: { error: string | null; saved: boolean }) {
+export function Feedback({ error, saved, savedText = 'Saved.' }: { error: string | null; saved: boolean; savedText?: string }) {
   if (error) {
     return (
       <p role="alert" className="mt-3 text-[12px] text-live font-tight">
@@ -63,7 +63,7 @@ export function Feedback({ error, saved }: { error: string | null; saved: boolea
   if (saved) {
     return (
       <p role="status" className="mt-3 text-[12px] text-muted font-tight">
-        Saved.
+        {savedText}
       </p>
     );
   }
