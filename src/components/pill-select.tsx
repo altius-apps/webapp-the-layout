@@ -38,6 +38,8 @@ interface Props<V extends string | number> {
   className?: string;
   /** Anchor the popover to the trigger's left (default) or right edge. */
   align?: 'left' | 'right';
+  /** Max-height class for the menu (default max-h-[60vh]); it scrolls past that. */
+  menuHeightClass?: string;
 }
 
 export function PillSelect<V extends string | number>({
@@ -47,11 +49,13 @@ export function PillSelect<V extends string | number>({
   ariaLabel,
   className = '',
   align = 'left',
+  menuHeightClass = 'max-h-[60vh]',
 }: Props<V>) {
   const [open, setOpen] = useState(false);
   const [focusIdx, setFocusIdx] = useState<number>(-1);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const listId = useId();
 
   const enabledIndexes = useMemo(
@@ -73,6 +77,23 @@ export function PillSelect<V extends string | number>({
     const idx = options.findIndex((o) => o.value === value);
     setFocusIdx(idx >= 0 && !options[idx].disabled ? idx : enabledIndexes[0] ?? -1);
   }, [open, options, value, enabledIndexes]);
+
+  // Scroll a menu option into view (centered) when it's outside the visible
+  // part of a scrolling menu. Moves the list only, never the page.
+  const keepInView = useCallback((idx: number) => {
+    const list = listRef.current;
+    const item = list?.children[idx] as HTMLElement | undefined;
+    if (!list || !item) return;
+    if (item.offsetTop < list.scrollTop || item.offsetTop + item.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = item.offsetTop - (list.clientHeight - item.offsetHeight) / 2;
+    }
+  }, []);
+
+  // Open on the selected option, not the top of a long list.
+  useEffect(() => {
+    if (open) keepInView(options.findIndex((o) => o.value === value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Outside click + Escape close.
   useEffect(() => {
@@ -120,6 +141,7 @@ export function PillSelect<V extends string | number>({
           ? enabledIndexes[0]
           : enabledIndexes[(pos + dir + enabledIndexes.length) % enabledIndexes.length];
       setFocusIdx(next);
+      keepInView(next);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const opt = options[focusIdx];
@@ -127,9 +149,11 @@ export function PillSelect<V extends string | number>({
     } else if (e.key === 'Home') {
       e.preventDefault();
       setFocusIdx(enabledIndexes[0] ?? -1);
+      keepInView(enabledIndexes[0] ?? -1);
     } else if (e.key === 'End') {
       e.preventDefault();
       setFocusIdx(enabledIndexes[enabledIndexes.length - 1] ?? -1);
+      keepInView(enabledIndexes[enabledIndexes.length - 1] ?? -1);
     }
   }
 
@@ -160,6 +184,7 @@ export function PillSelect<V extends string | number>({
 
       {open && (
         <ul
+          ref={listRef}
           id={listId}
           role="listbox"
           aria-label={ariaLabel}
@@ -167,7 +192,8 @@ export function PillSelect<V extends string | number>({
           className={[
             'absolute top-full mt-1.5 z-30 min-w-[--pill-w] py-1.5',
             'bg-surface rounded-card shadow-lift',
-            'max-h-[60vh] overflow-y-auto',
+            menuHeightClass,
+            'overflow-y-auto',
             align === 'right' ? 'right-0' : 'left-0',
           ].join(' ')}
           style={

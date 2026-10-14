@@ -16,7 +16,7 @@
 // mirror that client-side (disable Schedule + show the note) rather than
 // letting the request round-trip to fail.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   DRAFT_CLOCK_SECONDS,
@@ -424,12 +424,12 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const SLOTS = Array.from({ length: 48 }, (_, i) => i * 30);
 const DEFAULT_MINUTES = 20 * 60; // 8 PM
 
-/** Day + time picker: a month calendar with every day outside the window
- *  blocked, then a 30-minute time PillSelect for the chosen day (Hunter,
- *  2026-10-14; the native datetime-local popup can't take our styling). The
- *  window is [max(now, min), max ?? +60 days] — a day is clickable while one of
- *  its slots falls inside it. Times are the viewer's local day; the saved
- *  instant is UTC. */
+/** Day + time picker on one row: a date pill that pops up a month calendar
+ *  (every day outside the window blocked) and a 30-minute time PillSelect
+ *  showing 4 slots at a time (Hunter, 2026-10-14; the native datetime-local
+ *  popup can't take our styling). The window is [max(now, min), max ?? +60
+ *  days] — a day is clickable while one of its slots falls inside it. Times are
+ *  the viewer's local day; the saved instant is UTC. */
 function DateTimeField({
   label,
   value,
@@ -460,6 +460,30 @@ function DateTimeField({
   const firstMonth = monthStart(new Date(floorMs));
   const lastMonth = monthStart(new Date(ceilMs));
   const [month, setMonth] = useState(() => monthStart(parsed ?? new Date(floorMs)));
+  const [calOpen, setCalOpen] = useState(false);
+  const calRef = useRef<HTMLDivElement | null>(null);
+
+  // Outside click + Escape close the calendar (same as PillSelect's menu).
+  useEffect(() => {
+    if (!calOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!calRef.current?.contains(e.target as Node)) setCalOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCalOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [calOpen]);
+
+  const toggleCalendar = () => {
+    if (!calOpen) setMonth(monthStart(parsed ?? new Date(floorMs)));
+    setCalOpen((o) => !o);
+  };
 
   const cells = useMemo(() => {
     const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
@@ -483,6 +507,7 @@ function DateTimeField({
           ? DEFAULT_MINUTES
           : open[0];
     onChange(composeLocal(day, m).toISOString());
+    setCalOpen(false);
   };
 
   const timeOptions = useMemo(() => {
@@ -507,64 +532,96 @@ function DateTimeField({
       <span className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
         {label}
       </span>
-      <div className="max-w-[340px] rounded-card-sm border border-hairline p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <MonthButton dir="prev" disabled={!canPrev} onClick={() => setMonth(addMonths(month, -1))} />
-          <span className="font-tight text-[13.5px] font-bold text-ink" aria-live="polite">
-            {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-          </span>
-          <MonthButton dir="next" disabled={!canNext} onClick={() => setMonth(addMonths(month, 1))} />
-        </div>
-        <div className="grid grid-cols-7 gap-y-1 text-center">
-          {WEEKDAYS.map((w, i) => (
-            <span key={i} aria-hidden="true" className="pb-1 font-tight text-[10px] font-bold tracking-[0.14em] text-faint">
-              {w}
-            </span>
-          ))}
-          {cells.map((d, i) => {
-            if (!d) return <span key={`pad-${i}`} />;
-            const key = dayKey(d);
-            const open = openDays.has(key);
-            const selected = key === selectedDay;
-            return (
-              <button
-                key={key}
-                type="button"
-                disabled={!open}
-                aria-pressed={selected}
-                aria-label={dayLabel(d)}
-                onClick={() => pickDay(key)}
-                className={[
-                  'mx-auto flex h-10 w-10 items-center justify-center rounded-full font-tight text-[13px] tabular',
-                  'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  selected
-                    ? 'bg-accent text-accent-ink font-bold'
-                    : open
-                      ? 'text-ink font-semibold hover:bg-ink/[0.06] cursor-pointer'
-                      : 'text-faint opacity-40 cursor-not-allowed',
-                  key === todayKey && !selected ? 'ring-1 ring-inset ring-hairline' : '',
-                ].join(' ')}
-              >
-                {d.getDate()}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <div ref={calRef} className="relative inline-flex items-center">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={calOpen}
+            aria-label={`${label} day`}
+            onClick={toggleCalendar}
+            className={[
+              'inline-flex items-center gap-2 pl-3.5 pr-2.5 py-[7px] rounded-full min-h-[36px]',
+              'text-[11px] font-bold tracking-[0.14em] uppercase font-tight whitespace-nowrap',
+              'bg-ink/5 text-ink cursor-pointer hover:bg-ink/10 transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            ].join(' ')}
+          >
+            <span>{parsed ? dayLabel(parsed) : 'Pick a day'}</span>
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+              className={['text-muted transition-transform duration-150', calOpen ? 'rotate-180' : ''].join(' ')}
+            >
+              <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
 
-      {selectedDay && selectedMinutes != null && (
-        <div className="mt-3">
-          <span className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
-            Time
-          </span>
+          {calOpen && (
+            <div
+              role="dialog"
+              aria-label={`${label} calendar`}
+              className="absolute left-0 top-full z-30 mt-1.5 w-[316px] max-w-[calc(100vw-32px)] rounded-card bg-surface p-3 shadow-lift"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <MonthButton dir="prev" disabled={!canPrev} onClick={() => setMonth(addMonths(month, -1))} />
+                <span className="font-tight text-[13.5px] font-bold text-ink" aria-live="polite">
+                  {month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                </span>
+                <MonthButton dir="next" disabled={!canNext} onClick={() => setMonth(addMonths(month, 1))} />
+              </div>
+              <div className="grid grid-cols-7 gap-y-1 text-center">
+                {WEEKDAYS.map((w, i) => (
+                  <span key={i} aria-hidden="true" className="pb-1 font-tight text-[10px] font-bold tracking-[0.14em] text-faint">
+                    {w}
+                  </span>
+                ))}
+                {cells.map((d, i) => {
+                  if (!d) return <span key={`pad-${i}`} />;
+                  const key = dayKey(d);
+                  const open = openDays.has(key);
+                  const selected = key === selectedDay;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={!open}
+                      aria-pressed={selected}
+                      aria-label={dayLabel(d)}
+                      onClick={() => pickDay(key)}
+                      className={[
+                        'mx-auto flex h-10 w-10 items-center justify-center rounded-full font-tight text-[13px] tabular',
+                        'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        selected
+                          ? 'bg-accent text-accent-ink font-bold'
+                          : open
+                            ? 'text-ink font-semibold hover:bg-ink/[0.06] cursor-pointer'
+                            : 'text-faint opacity-40 cursor-not-allowed',
+                        key === todayKey && !selected ? 'ring-1 ring-inset ring-hairline' : '',
+                      ].join(' ')}
+                    >
+                      {d.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {selectedDay && selectedMinutes != null && (
           <PillSelect
             value={selectedMinutes}
             options={timeOptions}
             onChange={(m) => onChange(composeLocal(selectedDay, m).toISOString())}
             ariaLabel={`${label} time`}
+            menuHeightClass="max-h-[148px]"
           />
-        </div>
-      )}
+        )}
+      </div>
       <p className="mt-2 font-tight text-[12.5px] font-medium text-muted">
         {parsed && selectedMinutes != null ? `${dayLabel(parsed)} · ${timeLabel(selectedMinutes)}` : 'Pick a day'}
       </p>
