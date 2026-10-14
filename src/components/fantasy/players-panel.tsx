@@ -21,6 +21,9 @@ import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
 import {
   getMyContestTeam,
+  getContestPeriods,
+  getRosteredPct,
+  periodsToWeeks,
   getTeamPlayers,
   addDrop,
   getWaiverPlayers,
@@ -69,12 +72,33 @@ interface Row {
   rating: PlayerRating | undefined;
 }
 
-export function PlayersPanel({ contest }: { contest: ContestView }) {
+export function PlayersPanel({ contest, isOfficial = false }: { contest: ContestView; isOfficial?: boolean }) {
   const { user } = useAuth();
   const isUfa = contest.competitionDef.playerLeague === 'ufa';
   const isDrafted = contest.settings.draft === true;
   const isWeekly = contest.settings.mode === 'weekly-stats';
   const isEvent = contest.settings.mode === 'event';
+
+  const [rosteredPct, setRosteredPct] = useState<Map<string, number> | undefined>(undefined);
+  useEffect(() => {
+    if (!isOfficial) return;
+    let cancelled = false;
+    const period = isEvent
+      ? Promise.resolve('event')
+      : getContestPeriods(contest.id).then((periods) => {
+          const weeks = periodsToWeeks(periods);
+          const nowMs = Date.now();
+          const upcoming = weeks.find((w) => w.lockAt == null || new Date(w.lockAt).getTime() > nowMs);
+          return (upcoming ?? weeks[weeks.length - 1])?.week ?? null;
+        });
+    period
+      .then((p) => (p ? getRosteredPct(contest.id, p) : null))
+      .then((m) => m && !cancelled && setRosteredPct(m))
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [contest.id, isOfficial, isEvent]);
 
   const [projections, setProjections] = useState<ProjectionMap | undefined>(undefined);
   useEffect(() => {
@@ -367,6 +391,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
               seasonYear={contest.seasonYear}
               playerLeague={contest.competitionDef.playerLeague}
               projections={projections}
+              rosteredPct={rosteredPct?.get(`${contest.competitionDef.playerLeague}:${row.playerId}`)}
               canAdd={canAddDrop && row.isAvailable && !row.isMine && row.waiverAvailableAt == null}
               onOpenAdd={(playerId, playerName) => setDropSheetPlayer({ playerId, playerName })}
               canClaim={canAddDrop && row.waiverAvailableAt != null}
@@ -447,6 +472,7 @@ function PlayerRow({
   seasonYear,
   playerLeague,
   projections,
+  rosteredPct,
   canAdd,
   onOpenAdd,
   canClaim,
@@ -459,6 +485,7 @@ function PlayerRow({
   seasonYear: number;
   playerLeague: string;
   projections: ProjectionMap | undefined;
+  rosteredPct: number | undefined;
   canAdd: boolean;
   onOpenAdd: (playerId: string, playerName: string) => void;
   canClaim: boolean;
@@ -499,6 +526,9 @@ function PlayerRow({
       {row.teamName && <span className="block font-tight text-[11.5px] text-muted truncate">{row.teamName}</span>}
       <RatingLine rating={row.rating} />
       <span className="block font-tight text-[10.5px] text-faint mt-0.5">{row.ownerLabel}</span>
+      {rosteredPct != null && rosteredPct > 0 && (
+        <span className="block font-tight text-[10.5px] text-faint mt-0.5">Rostered {rosteredPct}%</span>
+      )}
       {row.waiverAvailableAt && (
         <span className="block font-tight text-[10.5px] text-faint mt-0.5">
           {waiverClearsLabel(row.waiverAvailableAt)}

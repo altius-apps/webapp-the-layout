@@ -24,6 +24,7 @@ import {
   periodsToWeeks,
   waiverSettings,
   type ContestView,
+  type FantasyLeagueSummary,
   type Matchup,
   type H2HStandingRow,
 } from '@/lib/fantasy/leagues';
@@ -38,6 +39,8 @@ import { H2HStandings } from '@/components/fantasy/h2h-standings';
 import { PlayoffBracket } from '@/components/fantasy/playoff-bracket';
 import { InviteCodeRow } from '@/components/fantasy/invite-code-row';
 import { LeagueMembersPanel } from '@/components/fantasy/league-members-panel';
+import { NoDraftCard } from '@/components/fantasy/no-draft-card';
+import { OfficialStandings } from '@/components/fantasy/official-standings';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 
 function periodLockLabel(w: FantasyWeek): string {
@@ -55,7 +58,8 @@ function periodLockLabel(w: FantasyWeek): string {
   return `Locks ${s}`;
 }
 
-export function LeagueView({ contest }: { contest: ContestView }) {
+export function LeagueView({ contest, league }: { contest: ContestView; league: FantasyLeagueSummary | null }) {
+  const isOfficial = league?.isOfficial ?? false;
   const isH2H = contestFormat(contest.settings) === 'h2h';
   const isWeekly = contest.settings.mode === 'weekly-stats';
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
@@ -76,7 +80,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
     Promise.all([
       getContestPeriods(contest.id).catch(() => []),
       isH2H ? getH2HStandings(contest.id).catch(() => []) : Promise.resolve([]),
-      !isH2H ? getContestStandings(contest.id).catch(() => []) : Promise.resolve([]),
+      !isH2H && !isOfficial ? getContestStandings(contest.id).catch(() => []) : Promise.resolve([]),
       getMatchups(contest.id).catch(() => []),
     ]).then(([periods, h2h, points, m]) => {
       if (cancelled) return;
@@ -89,7 +93,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
     return () => {
       cancelled = true;
     };
-  }, [contest.id, isH2H, isWeekly]);
+  }, [contest.id, isH2H, isWeekly, isOfficial]);
 
   const hasSchedule = isWeekly && weeks.length > 0;
   const playoffMatchups = matchups.filter((m) => m.stage !== 'regular');
@@ -98,7 +102,11 @@ export function LeagueView({ contest }: { contest: ContestView }) {
   return (
     <div className="space-y-8">
       {/* ── Draft card (until the draft is done) ── */}
-      {!draftDone && <DraftCard contest={contest} data={draftCard} />}
+      {isOfficial ? (
+        <NoDraftCard contest={contest} />
+      ) : (
+        !draftDone && <DraftCard contest={contest} data={draftCard} />
+      )}
 
       {/* ── Standings ──────────────────────────────────────────────────── */}
       <section aria-labelledby="standings-heading">
@@ -124,6 +132,8 @@ export function LeagueView({ contest }: { contest: ContestView }) {
           </div>
         ) : isH2H ? (
           <H2HStandings contestId={contest.id} rows={h2hStandings} />
+        ) : isOfficial ? (
+          <OfficialStandings contestId={contest.id} />
         ) : pointsStandings.length === 0 ? (
           <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
             <p className="text-muted font-tight text-[14px]">No teams yet — be the first to build one.</p>
@@ -223,11 +233,15 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       )}
 
       {/* ── Invite + join CTA ───────────────────── */}
-      {!draftDone && <InviteCodeRow leagueId={contest.leagueId} />}
-      <LeagueMembersPanel leagueId={contest.leagueId} />
+      {!draftDone && !isOfficial && <InviteCodeRow leagueId={contest.leagueId} />}
+      <LeagueMembersPanel
+        leagueId={contest.leagueId}
+        isPublic={league?.isPublic}
+        memberCount={isOfficial ? league?.memberCount : undefined}
+      />
 
       {/* ── Draft card (after the draft: results link, last) ── */}
-      {draftDone && <DraftCard contest={contest} data={draftCard} />}
+      {draftDone && !isOfficial && <DraftCard contest={contest} data={draftCard} />}
     </div>
   );
 }

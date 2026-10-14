@@ -21,6 +21,7 @@ import {
 import { divisionSuffix } from '@/lib/fantasy/competitions';
 import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
+import { OfficialBadge } from '@/components/fantasy/official-badge';
 import { InviteMenu } from '@/components/fantasy/invite-menu';
 
 interface Props {
@@ -76,9 +77,12 @@ export function LeagueHeader({ contest, league }: Props) {
       />
 
       <div className="min-w-0 flex-1">
-        <h1 className="m-0 font-display italic text-[20px] lg:text-[22px] font-bold tracking-[-0.02em] leading-[1.1] text-ink truncate">
-          {title}
-        </h1>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <h1 className="m-0 font-display italic text-[20px] lg:text-[22px] font-bold tracking-[-0.02em] leading-[1.1] text-ink truncate">
+            {title}
+          </h1>
+          {league?.isOfficial && <OfficialBadge />}
+        </div>
         <p className="m-0 font-tight text-[12px] text-muted truncate">
           {contest.competitionDef.shortLabel}
           {divisionSuffix(contest.settings)} · {contest.seasonYear}

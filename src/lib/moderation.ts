@@ -125,3 +125,38 @@ export function moderateName(text: string, field = 'Name'): string | null {
   }
   return null;
 }
+
+/**
+ * Character ranges (end exclusive) of profanity inside `text`, for blurring
+ * chat instead of rejecting it. Same matcher, name whitelist and blocklist as
+ * containsProfanity; a match inside a whitelisted name ("Dickson") is skipped.
+ */
+export function profanitySpans(text: string): Array<{ start: number; end: number }> {
+  if (!text) return [];
+  const spans: Array<{ start: number; end: number }> = [];
+  const words = [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({
+    word: m[0].toLowerCase(),
+    start: m.index ?? 0,
+    end: (m.index ?? 0) + m[0].length,
+  }));
+  const whitelisted = (start: number, end: number) =>
+    words.some((w) => w.start <= start && w.end >= end && NAME_WHITELIST.has(w.word));
+
+  for (const m of matcher.getAllMatches(text, true)) {
+    const start = m.startIndex;
+    const end = m.endIndex + 1;
+    if (!whitelisted(start, end)) spans.push({ start, end });
+  }
+  for (const w of words) {
+    if (!NAME_WHITELIST.has(w.word) && hasBlockedTerm(w.word)) spans.push({ start: w.start, end: w.end });
+  }
+
+  spans.sort((a, b) => a.start - b.start);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const s of spans) {
+    const last = merged[merged.length - 1];
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end);
+    else merged.push({ ...s });
+  }
+  return merged;
+}

@@ -10,10 +10,11 @@
 // Web port of the mobile app's LeagueFeed.tsx + FeedRow.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/).
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
+import { BlurredText } from '@/components/fantasy/blurred-text';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   getLeagueActivity,
@@ -55,9 +56,10 @@ function activityHref(item: ActivityItem, contestId: string): string | null {
 interface Props {
   contest: ContestView;
   outlined?: boolean;
+  isOfficial?: boolean;
 }
 
-export function LeagueFeed({ contest, outlined = false }: Props) {
+export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Props) {
   // In the draft room's white sheet, cards are outlined instead of shadowed.
   const card = outlined ? 'bg-surface rounded-card-lg border border-hairline' : 'bg-surface rounded-card-lg shadow-card';
   const { user } = useAuth();
@@ -104,7 +106,8 @@ export function LeagueFeed({ contest, outlined = false }: Props) {
     Promise.all([
       getLeagueActivity(leagueId, ACTIVITY_LIMIT).catch(() => []),
       user ? getLeagueMessages(leagueId).catch(() => []) : Promise.resolve([]),
-      getLeagueMembers(leagueId).catch(() => []),
+      // An official league can have thousands of members — never list them all.
+      isOfficial ? Promise.resolve([]) : getLeagueMembers(leagueId).catch(() => []),
     ]).then(([a, m, mem]) => {
       if (cancelled) return;
       setActivity(a);
@@ -115,13 +118,41 @@ export function LeagueFeed({ contest, outlined = false }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [leagueId, user]);
+  }, [leagueId, user, isOfficial]);
 
   useEffect(() => {
     if (!leagueId) return;
-    const channel = subscribeLeagueFeed(leagueId, refetch);
-    return () => unsubscribeLeagueFeed(channel);
-  }, [leagueId, refetch]);
+    // An official league can have thousands of viewers: fold a burst of
+    // realtime events into one refetch per 5 s per viewer.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onChange = isOfficial
+      ? () => {
+          timer ??= setTimeout(() => {
+            timer = null;
+            refetch();
+          }, 5000);
+        }
+      : refetch;
+    const channel = subscribeLeagueFeed(leagueId, onChange);
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribeLeagueFeed(channel);
+    };
+  }, [leagueId, refetch, isOfficial]);
+
+  // Official leagues: names for the people in the chat only, never the whole
+  // league. Each id is asked for once (a member who left is never found).
+  const askedNames = useRef(new Set<string>());
+  useEffect(() => {
+    if (!isOfficial) return;
+    const missing = [...new Set(messages.map((m) => m.userId))].filter((id) => !askedNames.current.has(id));
+    if (missing.length === 0) return;
+    for (const id of missing) askedNames.current.add(id);
+    // Not cancelled on re-run: a newer message batch mustn't drop these names.
+    getLeagueMembers(leagueId, missing)
+      .then((found) => setMembers((prev) => [...prev, ...found]))
+      .catch(() => {});
+  }, [isOfficial, leagueId, messages]);
 
   const nameByUserId = useMemo(() => {
     const map = new Map<string, string>();
@@ -254,7 +285,7 @@ export function LeagueFeed({ contest, outlined = false }: Props) {
                   message={entry.item}
                   authorName={nameByUserId.get(entry.item.userId) ?? 'Member'}
                   mine={entry.item.userId === user?.id}
-                  canDelete={isCommissioner || entry.item.userId === user?.id}
+                  canDelete={isCommissioner || entry.item.userId === user?.id || (isOfficial && user?.isAdmin === true)}
                   onDelete={() => setPendingDeleteId(entry.item.id)}
                 />
               )}
@@ -292,7 +323,7 @@ function ActivityRow({ item, contestId }: { item: ActivityItem; contestId: strin
   const href = activityHref(item, contestId);
   const text = (
     <span className="font-tight text-[12.5px] text-faint text-center">
-      {activityText(item)} <span className="text-[11px]">· {relativeTime(item.createdAt)}</span>
+      <BlurredText text={activityText(item)} /> <span className="text-[11px]">· {relativeTime(item.createdAt)}</span>
     </span>
   );
 
@@ -331,7 +362,9 @@ function MessageRow({
         ].join(' ')}
       >
         {!mine && <span className="font-tight text-[11px] font-bold tracking-[0.02em] text-accent">{authorName}</span>}
-        <span className="font-tight text-[14px] leading-snug text-ink break-words">{message.body}</span>
+        <span className="font-tight text-[14px] leading-snug text-ink break-words">
+          <BlurredText text={message.body} />
+        </span>
         <div className="flex items-center gap-2 self-end">
           <span className="font-tight text-[10px] text-faint">{relativeTime(message.createdAt)}</span>
           {canDelete && (

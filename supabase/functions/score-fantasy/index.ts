@@ -44,6 +44,10 @@ const SCORING = {
 
 const EVENT_SCORING = { goal: 3, assist: 3, callahan: 10 } as const;
 
+// Finished weeks stay re-scored this many days after their lock (late stat
+// corrections), then they're final and skipped.
+const RESCORE_DAYS = 14;
+
 // USAU/WFDF/EUCS player ids are uuids (usau_player_event_stats.player_id,
 // wfdf_rosters.id, euf_rosters.id): one junk id in an .in() list makes
 // PostgREST 400 the whole query.
@@ -497,34 +501,68 @@ async function run(body: { contest?: string }) {
     }
   }
 
-  // 4. Teams → contest.
-  const teams = await fetchAll<TeamRow>((from, to) =>
-    supabase
-      .from('fantasy_teams')
-      .select('id, contest_id')
-      .order('id')
-      .range(from, to),
-  );
+  // Periods re-scored this run. A finished week more than RESCORE_DAYS past its
+  // lock is final — its scores are on file — so its rosters aren't re-read
+  // every hour (official leagues make that set large). H2H below still sees
+  // every locked period.
+  const rescorePeriods = new Map<string, Set<string>>();
+  for (const p of periods) {
+    if (!p.lock_at || nowMs < new Date(p.lock_at).getTime()) continue;
+    if (p.complete && nowMs - new Date(p.lock_at).getTime() > RESCORE_DAYS * 86_400_000) continue;
+    let set = rescorePeriods.get(p.contest_id);
+    if (!set) {
+      set = new Set();
+      rescorePeriods.set(p.contest_id, set);
+    }
+    set.add(p.period);
+  }
+
+  // 4. Teams → contest (only contests with something to re-score this run).
+  const scoringContestIds = contests.map((c) => c.id).filter((id) => rescorePeriods.has(id));
+  const teams: TeamRow[] = [];
+  for (const part of chunk(scoringContestIds, 100)) {
+    teams.push(
+      ...(await fetchAll<TeamRow>((from, to) =>
+        supabase
+          .from('fantasy_teams')
+          .select('id, contest_id')
+          .in('contest_id', part)
+          .order('id')
+          .range(from, to),
+      )),
+    );
+  }
   const contestOfTeam = new Map<string, string>();
   for (const t of teams) {
     contestOfTeam.set(t.id, t.contest_id);
   }
 
-  // 5. All roster slots, attributed to (contest, period); keep only locked ones.
-  const slots = await fetchAll<SlotRow>((from, to) =>
-    supabase
-      .from('fantasy_roster_slots')
-      .select('team_id, week, player_id, player_league, role')
-      .order('id')
-      .range(from, to),
-  );
+  // 5. Those teams' roster slots in the periods being scored; attributed to
+  // (contest, period) below, keeping only each contest's own locked periods.
+  const scoringPeriods = [...new Set([...rescorePeriods.values()].flatMap((set) => [...set]))];
+  const slots: SlotRow[] = [];
+  if (scoringPeriods.length > 0) {
+    for (const part of chunk(teams.map((t) => t.id), 150)) {
+      slots.push(
+        ...(await fetchAll<SlotRow>((from, to) =>
+          supabase
+            .from('fantasy_roster_slots')
+            .select('team_id, week, player_id, player_league, role')
+            .in('team_id', part)
+            .in('week', scoringPeriods)
+            .order('id')
+            .range(from, to),
+        )),
+      );
+    }
+  }
   // contest → team → period → slots
   const work = new Map<string, Map<string, Map<string, SlotRow[]>>>();
   const playersByContest = new Map<string, Set<string>>();
   for (const s of slots) {
     const cid = contestOfTeam.get(s.team_id);
     if (!cid) continue;
-    if (!lockedPeriods.get(cid)?.has(s.week)) continue;
+    if (!rescorePeriods.get(cid)?.has(s.week)) continue;
     let byTeam = work.get(cid);
     if (!byTeam) {
       byTeam = new Map();

@@ -10,6 +10,7 @@
 import { PageShell } from '@/components/page-shell';
 import { PlayMenu } from '@/components/fantasy/play-menu';
 import { MyLeaguesList } from '@/components/fantasy/my-leagues-list';
+import { PublicLeaguesList } from '@/components/fantasy/public-leagues-list';
 import { StartALeagueList } from '@/components/fantasy/start-a-league-list';
 import { hubGames } from '@/lib/fantasy/games';
 import { sortGamesBySoonest } from '@/lib/fantasy/game-dates';
@@ -24,6 +25,7 @@ export default async function FantasyHubPage() {
   return (
     <PageShell title="Fantasy Ultimate" titleSize="compact" controls={<PlayMenu />} hideFooterMobile>
       <MyLeaguesList />
+      <PublicLeaguesList />
       <StartALeagueList games={orderedGames} starts={starts} />
     </PageShell>
   );

@@ -18,6 +18,7 @@ import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import {
   getContestPeriods,
   getMyContestTeam,
+  getRosteredPct,
   periodsToWeeks,
   type ContestView,
   type ContestPeriod,
@@ -61,9 +62,11 @@ interface ContestRosterBuilderProps {
    *  mode (altiusapps/mobileapp-thelayout ·
    *  src/components/fantasy/RosterBuilder.tsx). */
   pool?: FantasyPlayerHit[];
+  /** Official leagues: show each search result's league-wide rostered %. */
+  showRosteredPct?: boolean;
 }
 
-export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProps) {
+export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }: ContestRosterBuilderProps) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
@@ -84,6 +87,18 @@ export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProp
   const [saveOk, setSaveOk] = useState(false);
 
   const isEventMode = contest.settings.mode === 'event';
+
+  const [rosteredPct, setRosteredPct] = useState<Map<string, number> | undefined>(undefined);
+  useEffect(() => {
+    if (!showRosteredPct || !selectedPeriod) return;
+    let cancelled = false;
+    getRosteredPct(contest.id, selectedPeriod)
+      .then((m) => !cancelled && setRosteredPct(m))
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [contest.id, showRosteredPct, selectedPeriod]);
 
   const [projections, setProjections] = useState<ProjectionMap | undefined>(undefined);
   useEffect(() => {
@@ -301,6 +316,7 @@ export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProp
             onClear={handleClearPlayer}
             disabled={isLocked}
             pool={pool}
+            rosteredPct={rosteredPct}
           />
         ) : (
           <>
@@ -313,6 +329,7 @@ export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProp
               onClear={handleClearPlayer}
               disabled={isLocked}
               pool={pool}
+              rosteredPct={rosteredPct}
               projections={projections}
             />
             <RoleSlotGroup
@@ -324,6 +341,7 @@ export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProp
               onClear={handleClearPlayer}
               disabled={isLocked}
               pool={pool}
+              rosteredPct={rosteredPct}
               projections={projections}
             />
           </>
@@ -537,6 +555,7 @@ interface TypeaheadProps {
   /** When present, search filters this pool locally instead of calling
    *  searchContestPlayers — see ContestRosterBuilderProps.pool above. */
   pool?: FantasyPlayerHit[];
+  rosteredPct?: Map<string, number>;
 }
 
 function PlayerTypeahead({
@@ -549,6 +568,7 @@ function PlayerTypeahead({
   onClear,
   disabled = false,
   pool,
+  rosteredPct,
 }: TypeaheadProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FantasyPlayerHit[]>([]);
@@ -768,6 +788,11 @@ function PlayerTypeahead({
                     <span className="block font-tight text-[11px] text-muted truncate">{hit.teamName}</span>
                   )}
                 </span>
+                {rosteredPct && (rosteredPct.get(`${contest.competitionDef.playerLeague}:${hit.playerId}`) ?? 0) > 0 && (
+                  <span className="flex-shrink-0 font-tight text-[10.5px] text-faint">
+                    Rostered {rosteredPct.get(`${contest.competitionDef.playerLeague}:${hit.playerId}`)}%
+                  </span>
+                )}
               </button>
               {isUfa && (
                 <Link
@@ -839,6 +864,7 @@ function RoleSlotGroup({
   onClear,
   disabled,
   pool,
+  rosteredPct,
   projections,
 }: {
   contest: ContestView;
@@ -849,6 +875,7 @@ function RoleSlotGroup({
   onClear: (slotIndex: number) => void;
   disabled: boolean;
   pool?: FantasyPlayerHit[];
+  rosteredPct?: Map<string, number>;
   projections?: ProjectionMap;
 }) {
   const roleSlots = slots.filter((s) => s.role === role);
@@ -892,6 +919,7 @@ function RoleSlotGroup({
                 onClear={onClear}
                 disabled={disabled}
                 pool={pool}
+                rosteredPct={rosteredPct}
               />
               {slot.player && (
                 <PreviewBadge
@@ -917,6 +945,7 @@ function FlexSlotGroup({
   onClear,
   disabled,
   pool,
+  rosteredPct,
 }: {
   contest: ContestView;
   slots: SlotState[];
@@ -925,6 +954,7 @@ function FlexSlotGroup({
   onClear: (slotIndex: number) => void;
   disabled: boolean;
   pool?: FantasyPlayerHit[];
+  rosteredPct?: Map<string, number>;
 }) {
   const filled = slots.filter((s) => s.player !== null).length;
   return (
@@ -952,6 +982,7 @@ function FlexSlotGroup({
             onClear={onClear}
             disabled={disabled}
             pool={pool}
+            rosteredPct={rosteredPct}
           />
         ))}
       </div>

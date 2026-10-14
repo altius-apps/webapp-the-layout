@@ -14,6 +14,10 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { ensureMyContestTeam } from '@/lib/fantasy/leagues';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 
+/** Fired by a join on the league page itself (detail: leagueId): the layout
+ *  is already mounted, so it re-runs the team check for the new member. */
+export const LEAGUE_JOINED_EVENT = 'fantasy:league-joined';
+
 export function EnsureContestTeam({
   contestId,
   leagueId,
@@ -30,12 +34,21 @@ export function EnsureContestTeam({
   const [error, setError] = useState<string | null>(null);
   // StrictMode re-runs effects; a second insert would hit the unique key.
   const ranFor = useRef<string | null>(null);
+  const [joins, setJoins] = useState(0);
 
   const displayName = user?.profile?.display_name ?? null;
 
   useEffect(() => {
+    const onJoined = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === leagueId) setJoins((n) => n + 1);
+    };
+    window.addEventListener(LEAGUE_JOINED_EVENT, onJoined);
+    return () => window.removeEventListener(LEAGUE_JOINED_EVENT, onJoined);
+  }, [leagueId]);
+
+  useEffect(() => {
     if (!user) return;
-    const key = `${user.id}:${contestId}:${displayName ?? ''}`;
+    const key = `${user.id}:${contestId}:${displayName ?? ''}:${joins}`;
     if (ranFor.current === key) return;
     ranFor.current = key;
     const showTeam = async () => {
@@ -50,7 +63,7 @@ export function EnsureContestTeam({
         if (err instanceof Error && err.message === 'You already have a team in this contest.') return showTeam();
         setError(err instanceof Error ? err.message : 'Could not create your team.');
       });
-  }, [user, displayName, contestId, leagueId, seasonYear]);
+  }, [user, displayName, contestId, leagueId, seasonYear, joins]);
 
   return (
     <>

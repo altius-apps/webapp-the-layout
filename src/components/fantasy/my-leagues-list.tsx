@@ -14,7 +14,15 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
-import { getMyLeagues, type MyLeagueRow, type MyLeagueContestRow } from '@/lib/fantasy/leagues';
+import { OfficialBadge } from '@/components/fantasy/official-badge';
+import {
+  getMyLeagues,
+  getMyContestTeam,
+  getContestTeamRank,
+  topPercent,
+  type MyLeagueRow,
+  type MyLeagueContestRow,
+} from '@/lib/fantasy/leagues';
 import { contestFormat, divisionSuffix } from '@/lib/fantasy/competitions';
 import { getGame } from '@/lib/fantasy/games';
 
@@ -66,6 +74,27 @@ function StatusPill({ chip }: { chip: StatusChip }) {
       {chip.label}
     </span>
   );
+}
+
+function OfficialRank({ contest }: { contest: MyLeagueContestRow }) {
+  const [label, setLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyContestTeam(contest.contestId)
+      .then((team) => (team ? getContestTeamRank(team.id) : null))
+      .then((r) => {
+        if (cancelled || !r) return;
+        if (r.totalPoints === 0 && contest.status === 'open') return;
+        setLabel(` · #${r.rank} of ${r.totalTeams.toLocaleString('en-US')} · top ${topPercent(r.rank, r.totalTeams)}%`);
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [contest.contestId, contest.status]);
+
+  return label;
 }
 
 export function MyLeaguesList() {
@@ -167,14 +196,18 @@ export function MyLeaguesList() {
                       size={40}
                     />
                     <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-                      <span className="font-tight text-[14px] font-semibold text-ink truncate">
-                        {showLeagueName ? r.league.name : r.contest.name}
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-tight text-[14px] font-semibold text-ink truncate">
+                          {showLeagueName ? r.league.name : r.contest.name}
+                        </span>
+                        {r.league.isOfficial && <OfficialBadge />}
                       </span>
                       <span className="font-tight text-[11px] text-muted truncate">
                         {r.contest.competitionDef.shortLabel}
                         {divisionSuffix(r.contest.settings)} · {r.contest.seasonYear}
                         {contestFormat(r.contest.settings) === 'h2h' ? ' · H2H' : ''}
                         {r.league.role === 'commissioner' ? ' · Commish' : ''}
+                        {r.league.isOfficial && <OfficialRank contest={r.contest} />}
                       </span>
                     </span>
                     <StatusPill chip={chip} />

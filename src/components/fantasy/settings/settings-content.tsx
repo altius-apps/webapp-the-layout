@@ -27,6 +27,7 @@ import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { LeagueLogoPicker } from '@/components/fantasy/league-logo-picker';
 import { NameCard, RosterCard } from '@/components/fantasy/league-settings-panel';
 import { LimitsCard } from './limits-card';
+import { VisibilityCard } from './visibility-card';
 import { FormatCard } from './format-card';
 import { WaiversCard } from './waivers-card';
 import { DeleteLeagueCard } from './delete-league-card';
@@ -150,6 +151,8 @@ export function SettingsContent({ contest, league }: Props) {
       </div>
 
       <LimitsCard contest={contest} onSaved={onSaved} />
+
+      {league && !league.isOfficial && <VisibilityCard leagueId={contest.leagueId} initialPublic={league.isPublic} />}
 
       {contest.settings.mode === 'weekly-stats' && <FormatCard contest={contest} onSaved={onSaved} />}
 

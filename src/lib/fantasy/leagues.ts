@@ -62,6 +62,10 @@ export interface FantasyLeagueSummary {
   contestCount: number;
   logoUrl: string | null;
   logoIcon: string | null;
+  /** Listed in /fantasy → Public; anyone signed in can join. */
+  isPublic: boolean;
+  /** Platform-run ("The Layout"): one per event / weekly season, no draft. */
+  isOfficial: boolean;
 }
 
 export type LeagueRole = 'commissioner' | 'member';
@@ -118,7 +122,7 @@ function mapContestRow(r: Record<string, unknown>): ContestView | null {
 export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary | null> {
   const { data, error } = await anon()
     .from('fantasy_leagues')
-    .select('id, name, owner_id, created_at, logo_url, logo_icon')
+    .select('id, name, owner_id, created_at, logo_url, logo_icon, is_public, is_official')
     .eq('id', leagueId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -134,20 +138,25 @@ export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary 
     name: data.name as string,
     ownerId: data.owner_id as string,
     createdAt: data.created_at as string,
-    memberCount: members ?? 0,
+    // An official league's owner (The Layout) is a member but never plays.
+    memberCount: Math.max(0, (members ?? 0) - (data.is_official ? 1 : 0)),
     contestCount: contests ?? 0,
     logoUrl: (data.logo_url as string) ?? null,
     logoIcon: (data.logo_icon as string) ?? null,
+    isPublic: Boolean(data.is_public),
+    isOfficial: Boolean(data.is_official),
   };
 }
 
-/** All members of a league with their public identity (denormalized). */
-export async function getLeagueMembers(leagueId: string): Promise<LeagueMember[]> {
-  const { data, error } = await anon()
+/** All members of a league with their public identity (denormalized), or
+ *  just `userIds` — an official league is too big to list whole. */
+export async function getLeagueMembers(leagueId: string, userIds?: string[]): Promise<LeagueMember[]> {
+  let q = anon()
     .from('fantasy_league_members')
     .select('user_id, role, member_display_name, member_username, joined_at')
-    .eq('league_id', leagueId)
-    .order('joined_at');
+    .eq('league_id', leagueId);
+  if (userIds) q = q.in('user_id', userIds);
+  const { data, error } = await q.order('joined_at');
   if (error) throw new Error(error.message);
   return (data ?? []).map((r: Record<string, unknown>) => ({
     userId: r.user_id as string,
@@ -330,6 +339,8 @@ export interface MyLeagueRow {
   memberCount: number;
   logoUrl: string | null;
   logoIcon: string | null;
+  isPublic: boolean;
+  isOfficial: boolean;
   contests: MyLeagueContestRow[];
 }
 
@@ -347,25 +358,27 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
 
   const { data, error } = await supabase
     .from('fantasy_league_members')
-    .select('league_id, role, fantasy_leagues:league_id (name, logo_url, logo_icon)')
+    .select('league_id, role, fantasy_leagues:league_id (name, logo_url, logo_icon, is_public, is_official)')
     .eq('user_id', user.id)
     .order('joined_at', { ascending: false });
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as Record<string, unknown>[];
   if (rows.length === 0) return [];
 
-  // One count query across all my leagues (bounded: a user is in few leagues).
+  // One head-count per league (a user is in few leagues). Counting fetched
+  // member rows capped at 1000 undercounted an official league.
   const ids = rows.map((r) => r.league_id as string);
-  const { data: memberRows } = await supabase
-    .from('fantasy_league_members')
-    .select('league_id')
-    .in('league_id', ids)
-    .limit(1000);
-  const counts = new Map<string, number>();
-  for (const m of memberRows ?? []) {
-    const id = (m as Record<string, unknown>).league_id as string;
-    counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
+  const counts = new Map<string, number>(
+    await Promise.all(
+      ids.map(async (id) => {
+        const { count } = await supabase
+          .from('fantasy_league_members')
+          .select('user_id', { count: 'exact', head: true })
+          .eq('league_id', id);
+        return [id, count ?? 0] as const;
+      }),
+    ),
+  );
 
   // Fan out to each league's contests, then to each contest's draft — two
   // bounded queries (a user is in few leagues, a league has few contests),
@@ -399,7 +412,13 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
   }
 
   return rows.map((r) => {
-    const lg = r.fantasy_leagues as { name?: string; logo_url?: string | null; logo_icon?: string | null } | null;
+    const lg = r.fantasy_leagues as {
+      name?: string;
+      logo_url?: string | null;
+      logo_icon?: string | null;
+      is_public?: boolean;
+      is_official?: boolean;
+    } | null;
     const leagueId = r.league_id as string;
     const contests: MyLeagueContestRow[] = (contestsByLeague.get(leagueId) ?? [])
       .map((c): MyLeagueContestRow | null => {
@@ -432,9 +451,136 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
       memberCount: counts.get(leagueId) ?? 1,
       logoUrl: lg?.logo_url ?? null,
       logoIcon: lg?.logo_icon ?? null,
+      isPublic: Boolean(lg?.is_public),
+      isOfficial: Boolean(lg?.is_official),
       contests,
     };
   });
+}
+
+// ─── Public + official leagues ──────────────────────────────────────────────
+
+/** One row of /fantasy → Public. Official leagues first, then by size. */
+export interface PublicLeagueRow {
+  leagueId: string;
+  name: string;
+  logoUrl: string | null;
+  logoIcon: string | null;
+  isOfficial: boolean;
+  memberCount: number;
+  contestId: string;
+  competition: CompetitionId;
+  competitionDef: CompetitionDef;
+  seasonYear: number;
+  settings: ContestSettings;
+  /** Next roster lock still ahead, or null once play has started. */
+  nextLockAt: string | null;
+  /** Joinable now (lock ahead, not drafted, room left). */
+  open: boolean;
+}
+
+/** Public leagues with a contest still in play — anon read, so pages cache it
+ *  (see public-leagues-cached.ts); never a per-user read. */
+export async function getPublicLeagues(limit = 50): Promise<PublicLeagueRow[]> {
+  const { data, error } = await anon().rpc('fantasy_public_leagues', { p_limit: limit });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Record<string, unknown>[])
+    .map((r): PublicLeagueRow | null => {
+      const def = getCompetition(r.competition as string);
+      if (!def) return null;
+      return {
+        leagueId: r.league_id as string,
+        name: r.name as string,
+        logoUrl: (r.logo_url as string) ?? null,
+        logoIcon: (r.logo_icon as string) ?? null,
+        isOfficial: Boolean(r.is_official),
+        // Minus The Layout, the official league's owner, who never plays.
+        memberCount: Math.max(0, Number(r.member_count ?? 0) - (r.is_official ? 1 : 0)),
+        contestId: r.contest_id as string,
+        competition: def.id,
+        competitionDef: def,
+        seasonYear: r.season_year as number,
+        settings: parseContestSettings(def, r.settings),
+        nextLockAt: (r.next_lock_at as string) ?? null,
+        open: Boolean(r.open),
+      };
+    })
+    .filter((r): r is PublicLeagueRow => r !== null);
+}
+
+/** Join a public league (no invite code). Idempotent; returns the league id.
+ *  The team itself is created on the league page (EnsureContestTeam). */
+export async function joinPublicLeague(leagueId: string): Promise<string> {
+  const { data, error } = await sessionClient().rpc('fantasy_join_public_league', { p_league: leagueId });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
+/** Commissioner: list a user league in Public (or take it back out). Official
+ *  leagues are always public and refuse this. */
+export async function setLeaguePublic(leagueId: string, isPublic: boolean): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_set_league_public', { p_league: leagueId, p_public: isPublic });
+  if (error) throw new Error(error.message);
+}
+
+/** One ranked standings row (ESPN-style: rank across the whole field). */
+export interface LeaderboardEntry {
+  teamId: string;
+  teamName: string;
+  ownerId: string;
+  ownerDisplayName: string | null;
+  ownerUsername: string | null;
+  totalPoints: number;
+  /** Ties share a rank. */
+  rank: number;
+  totalTeams: number;
+}
+
+/** A page of a contest's standings by total points (max 200 per page). */
+export async function getContestLeaderboard(contestId: string, limit = 100, offset = 0): Promise<LeaderboardEntry[]> {
+  const { data, error } = await anon().rpc('fantasy_contest_leaderboard', {
+    p_contest: contestId,
+    p_limit: limit,
+    p_offset: offset,
+  });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    teamId: r.team_id as string,
+    teamName: r.team_name as string,
+    ownerId: r.owner_id as string,
+    ownerDisplayName: (r.owner_display_name as string) ?? null,
+    ownerUsername: (r.owner_username as string) ?? null,
+    totalPoints: Number(r.total_points ?? 0),
+    rank: Number(r.rank),
+    totalTeams: Number(r.total_teams),
+  }));
+}
+
+/** One team's place in its contest: rank, field size, points. Null for an unknown team. */
+export async function getContestTeamRank(
+  teamId: string,
+): Promise<{ rank: number; totalTeams: number; totalPoints: number } | null> {
+  const { data, error } = await anon().rpc('fantasy_contest_team_rank', { p_team: teamId });
+  if (error) throw new Error(error.message);
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return { rank: Number(row.rank), totalTeams: Number(row.total_teams), totalPoints: Number(row.total_points ?? 0) };
+}
+
+/** "Top X%" for a rank in a field (ESPN's PCT, flipped to read naturally). */
+export function topPercent(rank: number, totalTeams: number): number {
+  if (totalTeams <= 0) return 100;
+  return Math.max(0.1, Math.round((rank / totalTeams) * 1000) / 10);
+}
+
+/** Share of teams rostering each player in one period, keyed
+ *  `${player_league}:${player_id}` → percent (0–100, one decimal). */
+export async function getRosteredPct(contestId: string, period: string): Promise<Map<string, number>> {
+  const { data, error } = await anon().rpc('fantasy_contest_roster_pct', { p_contest: contestId, p_period: period });
+  if (error) throw new Error(error.message);
+  return new Map(
+    ((data ?? []) as Record<string, unknown>[]).map((r) => [`${r.player_league}:${r.player_id}`, Number(r.pct ?? 0)]),
+  );
 }
 
 /** The signed-in user's role in a league, or null if not a member. */

@@ -11,13 +11,17 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
+import { JoinPublicLeagueButton } from '@/components/fantasy/join-public-league-button';
 import { getMyLeagueRole, type LeagueRole } from '@/lib/fantasy/leagues';
 
 interface Props {
   leagueId: string;
+  isPublic?: boolean;
+  /** Official leagues show the count only — the member list can be thousands. */
+  memberCount?: number;
 }
 
-export function LeagueMembersPanel({ leagueId }: Props) {
+export function LeagueMembersPanel({ leagueId, isPublic = false, memberCount }: Props) {
   const { user, loading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -45,11 +49,14 @@ export function LeagueMembersPanel({ leagueId }: Props) {
       {!loading && !roleLoading && !isMember && (
         <div className="bg-surface rounded-card-lg shadow-soft p-6 flex flex-col sm:flex-row sm:items-center gap-4">
           <p className="text-muted font-tight text-[13px] flex-1">
-            {user
-              ? "You're not a member of this league. Ask the commissioner for an invite link or join code."
-              : 'Sign in to see if you belong to this league, or ask the commissioner for an invite.'}
+            {isPublic
+              ? `This league is open to everyone.${memberCount != null ? ` ${memberCount.toLocaleString('en-US')} ${memberCount === 1 ? 'player' : 'players'} so far.` : ''}`
+              : user
+                ? "You're not a member of this league. Ask the commissioner for an invite link or join code."
+                : 'Sign in to see if you belong to this league, or ask the commissioner for an invite.'}
           </p>
-          {!user && (
+          {isPublic && <JoinPublicLeagueButton leagueId={leagueId} />}
+          {!isPublic && !user && (
             <button
               type="button"
               onClick={() => setAuthOpen(true)}

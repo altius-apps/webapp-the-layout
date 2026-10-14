@@ -18,9 +18,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { ToggleSwitch } from '@/components/fantasy/settings/shared';
 import { StepButton, stepTeams } from '@/components/fantasy/settings/limits-card';
 import { TypeOption } from '@/components/fantasy/settings/draft-settings-card';
-import { createLeague, createContest } from '@/lib/fantasy/leagues';
+import { createLeague, createContest, setLeaguePublic } from '@/lib/fantasy/leagues';
 import { nextStartForGame, type GameStartMap } from '@/lib/fantasy/game-dates';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import {
@@ -77,6 +78,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
   const [maxTeams, setMaxTeams] = useState(DEFAULT_MAX_TEAMS);
   const [draftType, setDraftType] = useState<DraftType>('snake');
   const [division, setDivision] = useState<FantasyDivision>('all');
+  const [isPublic, setIsPublic] = useState(false);
   // Set once createLeague succeeds, so a retry after a failed contest step
   // reuses that league instead of creating a second one.
   const [leagueId, setLeagueId] = useState<string | null>(null);
@@ -120,6 +122,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
       }
       const id = leagueId ?? (await createLeague(trimmed));
       setLeagueId(id);
+      if (isPublic) await setLeaguePublic(id, true);
       const contestId = await createContest(id, gameId, seasonYear, undefined, { maxTeams, draftType, division });
       await revalidateFantasyLeague(id, contestId).catch(() => null);
       router.push(`/fantasy/l/${contestId}`);
@@ -243,6 +246,18 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
           <p className="mt-1.5 text-[11px] text-faint font-tight">
             You&apos;ll set the draft time later in League Settings.
           </p>
+        </div>
+
+        <div className="mt-4 lg:mt-5 flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <span id="public-league-label" className="block font-tight text-[13.5px] font-semibold text-ink">
+              Public league
+            </span>
+            <p className="mt-0.5 text-[11px] text-faint font-tight">
+              Anyone can find and join it from Fantasy → Public. Drafted leagues still cap at 16 teams.
+            </p>
+          </div>
+          <ToggleSwitch checked={isPublic} onChange={() => setIsPublic((v) => !v)} label="Public league" />
         </div>
 
         {error && (

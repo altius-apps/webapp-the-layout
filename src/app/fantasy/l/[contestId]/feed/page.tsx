@@ -4,6 +4,7 @@
 
 import { notFound } from 'next/navigation';
 import { getContest } from '@/lib/fantasy/leagues';
+import { getLeagueCached } from '@/lib/fantasy/league-cached';
 import { LeagueFeed } from '@/components/fantasy/league-feed';
 
 export const revalidate = 0;
@@ -13,5 +14,6 @@ export default async function ContestFeedPage({ params }: { params: { contestId:
   const contest = await getContest(params.contestId).catch(() => null);
   if (!contest) notFound();
 
-  return <LeagueFeed contest={contest} />;
+  const league = await getLeagueCached(contest.leagueId).catch(() => null);
+  return <LeagueFeed contest={contest} isOfficial={league?.isOfficial ?? false} />;
 }

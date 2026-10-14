@@ -25,11 +25,11 @@ import {
   type FavoriteGame,
 } from '@/lib/favorites/data';
 
-function StarGlyph({ filled }: { filled: boolean }) {
+export function StarGlyph({ filled, size = 18 }: { filled: boolean; size?: number }) {
   return (
     <svg
-      width="18"
-      height="18"
+      width={size}
+      height={size}
       viewBox="0 0 20 20"
       fill={filled ? 'currentColor' : 'none'}
       stroke="currentColor"

@@ -13,7 +13,8 @@
 // LeagueChrome leaves them out there.
 
 import { AppShell } from '@/components/page-shell';
-import { getContest, getLeague } from '@/lib/fantasy/leagues';
+import { getContest } from '@/lib/fantasy/leagues';
+import { getLeagueCached } from '@/lib/fantasy/league-cached';
 import { LeagueHeader } from '@/components/fantasy/league-header';
 import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
 import { LeagueChrome } from '@/components/fantasy/league-chrome';
@@ -43,7 +44,7 @@ export default async function LeagueLayout({
     );
   }
 
-  const league = await getLeague(contest.leagueId).catch(() => null);
+  const league = await getLeagueCached(contest.leagueId).catch(() => null);
 
   return (
     <AppShell hideFooterMobile>

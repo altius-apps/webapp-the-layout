@@ -22,7 +22,7 @@ import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { ContestRosterBuilder } from '@/components/fantasy/contest-roster-builder';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 
-export function TeamTabClient({ contest }: { contest: ContestView }) {
+export function TeamTabClient({ contest, isOfficial = false }: { contest: ContestView; isOfficial?: boolean }) {
   const { user } = useAuth();
   const isDrafted = contest.settings.draft === true;
 
@@ -120,7 +120,7 @@ export function TeamTabClient({ contest }: { contest: ContestView }) {
         competition={contest.competition}
       />
 
-      <ContestRosterBuilder contest={contest} pool={pool} />
+      <ContestRosterBuilder contest={contest} pool={pool} showRosteredPct={isOfficial} />
 
       {pool && pool.length > 0 && bench.length > 0 && (
         <div>

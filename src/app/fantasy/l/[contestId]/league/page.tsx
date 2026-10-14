@@ -5,6 +5,7 @@
 
 import { redirect } from 'next/navigation';
 import { getContest } from '@/lib/fantasy/leagues';
+import { getLeagueCached } from '@/lib/fantasy/league-cached';
 import { contestFormat } from '@/lib/fantasy/competitions';
 import { LeagueView } from '@/components/fantasy/league-view';
 
@@ -17,5 +18,6 @@ export default async function ContestLeaguePage({ params }: { params: { contestI
   const isH2HWeekly = contest.settings.mode === 'weekly-stats' && contestFormat(contest.settings) === 'h2h';
   if (!isH2HWeekly) redirect(`/fantasy/l/${contest.id}`);
 
-  return <LeagueView contest={contest} />;
+  const league = await getLeagueCached(contest.leagueId).catch(() => null);
+  return <LeagueView contest={contest} league={league} />;
 }
