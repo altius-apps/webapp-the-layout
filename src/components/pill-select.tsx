@@ -190,7 +190,9 @@ export function PillSelect<V extends string | number>({
           aria-label={ariaLabel}
           tabIndex={-1}
           className={[
-            'absolute top-full mt-1.5 z-30 min-w-[--pill-w] py-1.5',
+            // w-max: as wide as the longest option (never narrower than the
+            // trigger), so labels like "11:30 AM" stay on one line.
+            'absolute top-full mt-1.5 z-30 w-max min-w-[--pill-w] py-1.5',
             'bg-surface rounded-card shadow-lift',
             menuHeightClass,
             'overflow-y-auto',
@@ -213,7 +215,7 @@ export function PillSelect<V extends string | number>({
                   onMouseEnter={() => !o.disabled && setFocusIdx(i)}
                   onClick={() => !o.disabled && select(o.value)}
                   className={[
-                    'w-[calc(100%-12px)] text-left px-3.5 py-2 mx-1.5 rounded-full flex items-center justify-between gap-3',
+                    'w-[calc(100%-12px)] text-left px-3.5 py-2 mx-1.5 rounded-full flex items-center justify-between gap-3 whitespace-nowrap',
                     'text-[12px] font-bold tracking-[0.12em] uppercase font-tight transition-colors duration-100',
                     o.disabled
                       ? 'text-faint cursor-not-allowed'
