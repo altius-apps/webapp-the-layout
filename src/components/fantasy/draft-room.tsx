@@ -447,6 +447,8 @@ export function DraftRoom({ contest, leagueName, teams: serverTeams, basePath }:
 
   // Snake only: an auction win isn't "a pick" (the auction room has its own moment).
   const freshPick = useFreshPick(picks, !loading && draft?.draftType === 'snake');
+  // A swipe up hides that pick's banner early; the board's slam is unaffected.
+  const [dismissedOverall, setDismissedOverall] = useState<number | null>(null);
 
   // With a player on the block the auction stage is what matters, so a sheet at
   // peek drops to its tab bar when a nomination opens.
@@ -613,12 +615,13 @@ export function DraftRoom({ contest, leagueName, teams: serverTeams, basePath }:
       <p className="sr-only" aria-live="polite">
         {freshPick && `Pick ${freshLabel}: ${freshTeamName} selects ${freshPick.playerName}`}
       </p>
-      {freshPick && (
+      {freshPick && freshPick.overall !== dismissedOverall && (
         <PickBanner
           key={freshPick.overall}
           label={freshLabel}
           teamName={freshTeamName}
           playerName={freshPick.playerName}
+          onDismiss={() => setDismissedOverall(freshPick.overall)}
         />
       )}
 
@@ -821,21 +824,78 @@ function useFreshPick(picks: DraftPick[], enabled: boolean): DraftPick | null {
   return fresh;
 }
 
-function PickBanner({ label, teamName, playerName }: { label: string; teamName: string; playerName: string }) {
+const BANNER_DISMISS_PX = 24; // upward drag that flicks the banner away
+
+function PickBanner({
+  label,
+  teamName,
+  playerName,
+  onDismiss,
+}: {
+  label: string;
+  teamName: string;
+  playerName: string;
+  onDismiss: () => void;
+}) {
+  // Swipe up to dismiss. The drag offset lives in a CSS variable on the outer
+  // layer (like the sheet's --sheet-top) — the inner card's fade-up animation
+  // owns its own transform, so the two can't fight.
+  const drag = useRef<{ id: number; y0: number; dy: number } | null>(null);
+  const setDy = (el: HTMLElement, px: number) => el.style.setProperty('--pick-dy', `${px}px`);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    drag.current = { id: e.pointerId, y0: e.clientY, dy: 0 };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.dataset.dragging = 'true';
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    d.dy = Math.min(0, e.clientY - d.y0);
+    setDy(e.currentTarget, d.dy);
+  };
+  const onPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    const el = e.currentTarget;
+    el.dataset.dragging = 'false';
+    if (d.dy <= -BANNER_DISMISS_PX) {
+      el.dataset.gone = 'true';
+      setDy(el, -(el.offsetHeight + el.offsetTop));
+      window.setTimeout(onDismiss, 200);
+    } else {
+      setDy(el, 0);
+    }
+  };
+
   return (
     <div
       aria-hidden="true"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      data-dragging="false"
+      data-gone="false"
       // A toast over the board (under the top bar), so the board doesn't jump on every pick.
-      className="absolute inset-x-3 top-3 z-50 mx-auto max-w-xl flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3 rounded-card bg-surface-hi shadow-hero px-4 py-3 motion-safe:animate-fade-up"
+      className={[
+        'absolute inset-x-3 top-3 z-50 mx-auto max-w-xl touch-none select-none cursor-grab active:cursor-grabbing',
+        'translate-y-[var(--pick-dy,0px)] transition-[transform,opacity] duration-200 ease-out',
+        'data-[dragging=true]:transition-none data-[gone=true]:opacity-0',
+      ].join(' ')}
     >
-      <span className="flex-shrink-0 font-tight text-[10.5px] font-extrabold tracking-[0.16em] uppercase text-accent">
-        The pick is in
-      </span>
-      <span className="min-w-0 font-tight text-[14px] lg:text-[15px] text-ink">
-        <span className="font-bold tabular">{label}</span>
-        {' · '}
-        {teamName} selects <span className="font-extrabold">{playerName}</span>
-      </span>
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3 rounded-card bg-surface-hi shadow-hero px-4 py-3 motion-safe:animate-fade-up">
+        <span className="flex-shrink-0 font-tight text-[10.5px] font-extrabold tracking-[0.16em] uppercase text-accent">
+          The pick is in
+        </span>
+        <span className="min-w-0 font-tight text-[14px] lg:text-[15px] text-ink">
+          <span className="font-bold tabular">{label}</span>
+          {' · '}
+          {teamName} selects <span className="font-extrabold">{playerName}</span>
+        </span>
+        <span aria-hidden="true" className="mx-auto mt-1.5 h-1 w-8 rounded-full bg-ink/15 sm:hidden" />
+      </div>
     </div>
   );
 }
@@ -1331,14 +1391,17 @@ function PlayersPanel({
       return;
     }
     const ref: DraftRef = { playerLeague: league, playerId: hit.playerId, playerName: hit.fullName };
-    if (queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague)) return;
-    const next = [...queue, ref];
+    // The star toggles: a queued player comes back out of the queue.
+    const queued = queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague);
+    const next = queued
+      ? queue.filter((q) => !(q.playerId === ref.playerId && q.playerLeague === ref.playerLeague))
+      : [...queue, ref];
     setQueue(next);
     saveDraftQueue(draft.id, next).catch(() => {});
   };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card p-4 lg:p-5">
+    <div className="bg-surface rounded-card-lg border border-hairline p-4 lg:p-5">
       <div className="flex flex-col sm:flex-row gap-2.5 mb-4">
         <input
           type="text"
@@ -1451,12 +1514,12 @@ function PlayerRow({
           <button
             type="button"
             onClick={onQueue}
-            disabled={queued}
-            aria-label={queued ? `${hit.fullName} is queued` : `Queue ${hit.fullName}`}
+            aria-pressed={queued}
+            aria-label={queued ? `Remove ${hit.fullName} from queue` : `Queue ${hit.fullName}`}
             className={[
-              'flex items-center justify-center w-9 h-9 rounded-full',
+              'flex items-center justify-center w-9 h-9 rounded-full cursor-pointer',
               'transition-colors duration-150',
-              queued ? 'text-accent bg-accent/10 cursor-default' : 'text-faint hover:text-ink hover:bg-ink/10 cursor-pointer',
+              queued ? 'text-accent bg-accent/10 hover:bg-accent/20' : 'text-faint hover:text-ink hover:bg-ink/10',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             ].join(' ')}
           >
@@ -1643,7 +1706,7 @@ function QueuePanel({
 
   if (!myTeam) {
     return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
+      <div className="bg-surface rounded-card-lg border border-hairline p-8 text-center">
         <p className="text-muted font-tight text-[13px] mb-3">Sign in with a team in this league to build a queue.</p>
         <button
           type="button"
@@ -1663,7 +1726,7 @@ function QueuePanel({
 
   if (queue.length === 0) {
     return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
+      <div className="bg-surface rounded-card-lg border border-hairline p-8 text-center">
         <p className="text-muted font-tight text-[13px]">
           Your queue is empty. Add players from the PLAYERS tab. If your clock runs out, autodraft picks for you: your
           queue first, then the top-ranked player left.
@@ -1686,7 +1749,7 @@ function QueuePanel({
   };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+    <div className="bg-surface rounded-card-lg border border-hairline overflow-hidden">
       <ul aria-label="Your draft queue">
         {queue.map((entry, idx) => (
           <li

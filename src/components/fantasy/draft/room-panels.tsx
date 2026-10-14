@@ -24,7 +24,8 @@ export interface RoomTeam {
   ownerIcon?: ResolvedIcon;
 }
 
-const CARD = 'bg-surface rounded-card-lg shadow-card';
+// Outlined, not shadowed: the sheet behind the cards is white (bg-surface).
+const CARD = 'bg-surface rounded-card-lg border border-hairline';
 
 /** What every panel needs to know about the draft, the same for each tab. */
 export interface RoomPanelContext {
@@ -102,7 +103,7 @@ export function RoomPanel({
       );
     case 'chat':
       // Mounted only while it's on screen: it holds its own realtime channel.
-      return collapsed ? null : <LeagueFeed contest={contest} />;
+      return collapsed ? null : <LeagueFeed contest={contest} outlined />;
   }
 }
 

@@ -54,9 +54,12 @@ function activityHref(item: ActivityItem, contestId: string): string | null {
 
 interface Props {
   contest: ContestView;
+  outlined?: boolean;
 }
 
-export function LeagueFeed({ contest }: Props) {
+export function LeagueFeed({ contest, outlined = false }: Props) {
+  // In the draft room's white sheet, cards are outlined instead of shadowed.
+  const card = outlined ? 'bg-surface rounded-card-lg border border-hairline' : 'bg-surface rounded-card-lg shadow-card';
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -177,7 +180,7 @@ export function LeagueFeed({ contest }: Props) {
     <>
     <div className="space-y-4">
       {isMember ? (
-        <div className="bg-surface rounded-card-lg shadow-card p-4">
+        <div className={`${card} p-4`}>
           {sendError && (
             <p className="text-[12px] text-accent font-tight mb-2" role="alert">
               {sendError}
@@ -216,7 +219,7 @@ export function LeagueFeed({ contest }: Props) {
           </div>
         </div>
       ) : (
-        <div className="bg-surface rounded-card-lg shadow-card p-4 flex items-center justify-between gap-4">
+        <div className={`${card} p-4 flex items-center justify-between gap-4`}>
           <p className="text-muted font-tight text-[13px]">
             {user ? 'Join the league to chat.' : 'Sign in and join the league to chat.'}
           </p>
@@ -233,11 +236,11 @@ export function LeagueFeed({ contest }: Props) {
       )}
 
       {loading && entries.length === 0 ? (
-        <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <div className={`${card} p-10 text-center`}>
           <div className="inline-block w-5 h-5 rounded-full border-2 border-ink/15 border-t-accent animate-spin" aria-hidden="true" />
         </div>
       ) : entries.length === 0 ? (
-        <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <div className={`${card} p-10 text-center`}>
           <p className="text-muted font-tight text-[14px]">No activity yet — say hi to your league.</p>
         </div>
       ) : (

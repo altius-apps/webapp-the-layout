@@ -133,8 +133,11 @@ export function AuctionRoom({
       onRequireAuth();
       return;
     }
-    if (queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague)) return;
-    const next = [...queue, ref];
+    // The star toggles: a queued player comes back out of the queue.
+    const queued = queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague);
+    const next = queued
+      ? queue.filter((q) => !(q.playerId === ref.playerId && q.playerLeague === ref.playerLeague))
+      : [...queue, ref];
     setQueue(next);
     saveDraftQueue(draft.id, next).catch(() => {});
   };
@@ -1000,7 +1003,7 @@ function AuctionPlayersPanel({
   };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card p-4 lg:p-5">
+    <div className="bg-surface rounded-card-lg border border-hairline p-4 lg:p-5">
       <input
         type="text"
         value={query}
@@ -1064,11 +1067,11 @@ function AuctionPlayersPanel({
                     <button
                       type="button"
                       onClick={() => onQueue({ playerLeague: league, playerId: hit.playerId, playerName: hit.fullName })}
-                      disabled={queued}
-                      aria-label={queued ? `${hit.fullName} is queued` : `Queue ${hit.fullName}`}
+                      aria-pressed={queued}
+                      aria-label={queued ? `Remove ${hit.fullName} from queue` : `Queue ${hit.fullName}`}
                       className={[
-                        'flex items-center justify-center w-9 h-9 rounded-full transition-colors duration-150',
-                        queued ? 'text-accent bg-accent/10 cursor-default' : 'text-faint hover:text-ink hover:bg-ink/10 cursor-pointer',
+                        'flex items-center justify-center w-9 h-9 rounded-full cursor-pointer transition-colors duration-150',
+                        queued ? 'text-accent bg-accent/10 hover:bg-accent/20' : 'text-faint hover:text-ink hover:bg-ink/10',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                       ].join(' ')}
                     >
@@ -1158,7 +1161,7 @@ function AuctionQueuePanel({
 
   if (!myTeam) {
     return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
+      <div className="bg-surface rounded-card-lg border border-hairline p-8 text-center">
         <p className="text-muted font-tight text-[13px] mb-3">Sign in with a team in this league to build a queue.</p>
         <button
           type="button"
@@ -1173,7 +1176,7 @@ function AuctionQueuePanel({
 
   if (queue.length === 0) {
     return (
-      <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
+      <div className="bg-surface rounded-card-lg border border-hairline p-8 text-center">
         <p className="text-muted font-tight text-[13px]">
           Your queue is empty. Add players from the PLAYERS tab. If your nomination clock runs out, autodraft nominates
           for you: your queue first, then the top-ranked player left.
@@ -1195,7 +1198,7 @@ function AuctionQueuePanel({
   };
 
   return (
-    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+    <div className="bg-surface rounded-card-lg border border-hairline overflow-hidden">
       <ul aria-label="Your draft queue">
         {queue.map((entry, idx) => (
           <li

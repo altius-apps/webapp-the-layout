@@ -7,7 +7,9 @@
 //
 // The sheet rests at three heights: `min` (handle + tabs only), `peek` (45% of
 // the stage, the default) and `full` (the whole stage, under the top bar). It
-// drags on the handle and tab strip only, so the lists inside scroll natively.
+// drags on the handle and tab strip, and (touch) on the panel too when a pull
+// DOWN starts with the list already at its top (Hunter, 2026-10-14). Every
+// other gesture in the panel scrolls the list natively.
 //
 // It is positioned with `top: var(--sheet-top)`, never a transform: ConfirmDialog
 // and AuthModal render `fixed inset-0` from inside the sheet (Chat, Players),
@@ -15,7 +17,7 @@
 // to the sheet. The variable is set imperatively while dragging (no re-render
 // per move); the board reads `--sheet-peek` to leave room under its last row.
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { RoomTabs, roomTabId, type RoomTab } from './room-tabs';
 
 export type SheetSnap = 'min' | 'peek' | 'full';
@@ -135,6 +137,105 @@ export function RoomStage({
   const stopDragRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => () => stopDragRef.current?.(), []);
 
+  // Snap a finished drag: a flick goes to the next height in its direction,
+  // otherwise the nearest height to where it was heading.
+  const settle = useCallback(
+    (samples: Drag['samples'], cancelled: boolean) => {
+      draggingRef.current = false;
+      sheetRef.current?.setAttribute('data-dragging', 'false');
+      const { tops: t, onSnap: setSnap } = latest.current;
+      const last = samples[samples.length - 1];
+      const from = samples.find((m) => m.t >= last.t - 100) ?? last;
+      const v = cancelled || last.t === from.t ? 0 : (last.y - from.y) / (last.t - from.t); // px/ms, + = down
+      const top = topRef.current;
+      const target =
+        (Math.abs(v) >= FLICK_PX_PER_MS ? snapInDirection(top, v < 0, t) : null) ?? nearestSnap(top + v * FLICK_LOOKAHEAD_MS, t);
+      applyTop(t[target]);
+      setSnap(target);
+    },
+    [applyTop],
+  );
+
+  // Pull-down on the panel moves the sheet while the list is at its top. Touch
+  // only, with non-passive listeners so the takeover can stop the native
+  // scroll/overscroll; a gesture that starts as a scroll stays a scroll.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    let g: { x0: number; y0: number; top0: number; mode: 'pending' | 'sheet' | 'scroll'; samples: Drag['samples'] } | null = null;
+    // A pull released over a button (Draft, the star) must not press it.
+    let blockClickUntil = 0;
+
+    // Anything between the finger and the panel that is scrolled down keeps the gesture.
+    const atTop = (target: EventTarget | null) => {
+      for (let el = target as HTMLElement | null; el && el !== panel.parentElement; el = el.parentElement) {
+        if (el.scrollTop > 0) return false;
+      }
+      return true;
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || (e.target as HTMLElement).closest('textarea')) {
+        g = null;
+        return;
+      }
+      const t = e.touches[0];
+      g = { x0: t.clientX, y0: t.clientY, top0: topRef.current, mode: 'pending', samples: [{ t: e.timeStamp, y: t.clientY }] };
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!g || g.mode === 'scroll') return;
+      const t = e.touches[0];
+      const dy = t.clientY - g.y0;
+      if (g.mode === 'pending') {
+        const pullDown = dy > 0 && dy >= Math.abs(t.clientX - g.x0) && atTop(e.target);
+        if (!pullDown) {
+          if (Math.abs(dy) >= DRAG_SLOP_PX) g.mode = 'scroll';
+          return;
+        }
+        // Claim it from the first move, or iOS starts its own overscroll.
+        e.preventDefault();
+        if (dy < DRAG_SLOP_PX) return;
+        g.mode = 'sheet';
+        draggingRef.current = true;
+        sheetRef.current?.setAttribute('data-dragging', 'true');
+      }
+      e.preventDefault();
+      const { tops: tp } = latest.current;
+      applyTop(Math.min(Math.max(g.top0 + dy, tp.full), tp.min));
+      g.samples.push({ t: e.timeStamp, y: t.clientY });
+      if (g.samples.length > 6) g.samples.shift();
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      if (g?.mode === 'sheet') {
+        blockClickUntil = e.timeStamp + 400;
+        settle(g.samples, e.type === 'touchcancel');
+      }
+      g = null;
+    };
+
+    const onClickCapture = (e: MouseEvent) => {
+      if (e.timeStamp > blockClickUntil) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    panel.addEventListener('touchstart', onStart, { passive: true });
+    panel.addEventListener('touchmove', onMove, { passive: false });
+    panel.addEventListener('touchend', onEnd);
+    panel.addEventListener('touchcancel', onEnd);
+    panel.addEventListener('click', onClickCapture, true);
+    return () => {
+      panel.removeEventListener('click', onClickCapture, true);
+      panel.removeEventListener('touchstart', onStart);
+      panel.removeEventListener('touchmove', onMove);
+      panel.removeEventListener('touchend', onEnd);
+      panel.removeEventListener('touchcancel', onEnd);
+    };
+  }, [tab, applyTop, settle]);
+
   // The move/up listeners go on window while a press is down, so a quick mouse
   // drag that leaves the 68px header is still followed.
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -168,24 +269,12 @@ export function RoomStage({
       if (ev.pointerId !== d.id) return;
       stop();
       if (!d.moved) return;
-      draggingRef.current = false;
       // The release can still click the button it ended on; that isn't a tap.
       suppressClick.current = true;
       window.setTimeout(() => {
         suppressClick.current = false;
       }, 100);
-      sheetRef.current?.setAttribute('data-dragging', 'false');
-
-      const { tops: t, onSnap: setSnap } = latest.current;
-      const last = d.samples[d.samples.length - 1];
-      const from = d.samples.find((m) => m.t >= last.t - 100) ?? last;
-      const v = cancelled || last.t === from.t ? 0 : (last.y - from.y) / (last.t - from.t); // px/ms, + = down
-      const top = topRef.current;
-      const target =
-        (Math.abs(v) >= FLICK_PX_PER_MS ? snapInDirection(top, v < 0, t) : null) ??
-        nearestSnap(top + v * FLICK_LOOKAHEAD_MS, t);
-      applyTop(t[target]);
-      setSnap(target);
+      settle(d.samples, cancelled);
     };
 
     const stop = () => {
@@ -250,7 +339,7 @@ export function RoomStage({
         aria-label="Draft tools"
         className={[
           'absolute inset-x-0 bottom-0 top-[var(--sheet-top,55%)] z-20 lg:mx-auto lg:max-w-[1080px]',
-          'flex flex-col overflow-hidden rounded-t-card-lg bg-bg shadow-hero',
+          'flex flex-col overflow-hidden rounded-t-card-lg bg-surface shadow-hero',
           'motion-safe:data-[ready=true]:data-[dragging=false]:transition-[top] motion-safe:data-[ready=true]:data-[dragging=false]:duration-300 motion-safe:data-[ready=true]:data-[dragging=false]:ease-out',
         ].join(' ')}
       >
@@ -276,6 +365,7 @@ export function RoomStage({
 
         <div
           key={tab}
+          ref={panelRef}
           id={PANEL_ID}
           role="tabpanel"
           aria-labelledby={roomTabId(tab)}
