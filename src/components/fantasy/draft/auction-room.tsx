@@ -32,6 +32,7 @@ import {
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import type { ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
+import type { ResolvedIcon } from '@/lib/profile/avatar-icon';
 import {
   projectedEventPoints,
   ratingKey,
@@ -56,6 +57,7 @@ import { RoomStage, SheetClock, type SheetControl } from './room-sheet';
 interface TeamInfo {
   id: string;
   teamName: string;
+  ownerIcon?: ResolvedIcon;
 }
 
 const SOLD_MS = 4000; // how long the SOLD stamp stays on the stage
@@ -379,6 +381,7 @@ function AuctionStage({
   error: string | null;
 }) {
   const teamName = (id: string | null) => (id && teamById.get(id)?.teamName) || 'Team';
+  const teamIcon = (id: string | null) => (id ? teamById.get(id)?.ownerIcon : undefined);
 
   // The full stamp would hide my own nominate button and clock: when I'm up,
   // the sale shows as the compact strip on the nominating stage instead.
@@ -392,7 +395,7 @@ function AuctionStage({
           <span className="font-tight text-[18px] lg:text-[22px] font-extrabold text-ink">{sold.playerName}</span>
           <span className="inline-flex items-center gap-2.5 font-tight text-[14px] text-muted">
             <span className="font-display italic font-bold text-[26px] leading-none text-ink tabular">${sold.highBid}</span>
-            <TeamAvatar id={sold.highTeamId} name={teamName(sold.highTeamId)} size="sm" />
+            <TeamAvatar name={teamName(sold.highTeamId)} icon={teamIcon(sold.highTeamId)} size="sm" />
             <span className="font-semibold text-ink truncate">{teamName(sold.highTeamId)}</span>
           </span>
         </div>
@@ -417,7 +420,7 @@ function AuctionStage({
               {isMyNominateTurn ? 'Your nomination' : 'Up to nominate'}
             </span>
             <div className="flex items-center gap-3 mt-2 lg:mt-3 min-w-0">
-              <TeamAvatar id={nominatingTeamId ?? ''} name={name} size="lg" />
+              <TeamAvatar name={name} icon={teamIcon(nominatingTeamId)} size="lg" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-display italic font-bold text-[26px] lg:text-[34px] leading-[0.95] tracking-[-0.02em] text-ink truncate">
@@ -517,7 +520,7 @@ function AuctionStage({
             ${nomination.highBid}
           </div>
           <div className="flex items-center justify-end gap-2 mt-1.5 min-w-0 lg:justify-center lg:mt-2">
-            <TeamAvatar id={nomination.highTeamId} name={highName} size="sm" />
+            <TeamAvatar name={highName} icon={teamIcon(nomination.highTeamId)} size="sm" />
             <span className="min-w-0 font-tight text-[13px] lg:text-[14px] font-bold text-ink truncate">{highName}</span>
           </div>
           {iAmHigh && (
@@ -538,7 +541,7 @@ function AuctionStage({
                   i === 0 ? 'bg-accent/15 ring-1 ring-inset ring-accent/60 motion-safe:animate-fade-up' : 'bg-ink/[0.07]',
                 ].join(' ')}
               >
-                <TeamAvatar id={b.teamId} name={teamName(b.teamId)} size="sm" />
+                <TeamAvatar name={teamName(b.teamId)} icon={teamIcon(b.teamId)} size="sm" />
                 <span className="font-extrabold text-ink tabular">${b.amount}</span>
                 <span className="text-muted max-w-[96px] truncate">{teamName(b.teamId)}</span>
               </li>
@@ -580,7 +583,7 @@ function AuctionStage({
                       i === 0 ? 'bg-accent/15 ring-1 ring-inset ring-accent/60 motion-safe:animate-fade-up' : 'bg-ink/[0.05]',
                     ].join(' ')}
                   >
-                    <TeamAvatar id={b.teamId} name={teamName(b.teamId)} size="sm" />
+                    <TeamAvatar name={teamName(b.teamId)} icon={teamIcon(b.teamId)} size="sm" />
                     <span className="min-w-0 flex-1 font-tight text-[13px] font-semibold text-ink truncate">
                       {teamName(b.teamId)}
                     </span>
@@ -850,6 +853,7 @@ export function AuctionBoard({
     return {
       id,
       name: teamById.get(id)?.teamName ?? 'Team',
+      icon: teamById.get(id)?.ownerIcon,
       detail: (
         <span className="flex items-center justify-between gap-1">
           <span className="font-bold text-ink">{st.openSlots > 0 ? `Max $${st.maxBid}` : 'Full'}</span>

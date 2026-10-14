@@ -13,6 +13,7 @@ const SCORING_ROWS: { stat: string; off: string; def: string; neg: boolean }[] =
   { stat: 'Goal', off: `+${SCORING.offender.goal}`, def: `+${SCORING.defender.goal}`, neg: false },
   { stat: 'Assist', off: `+${SCORING.offender.assist}`, def: `+${SCORING.defender.assist}`, neg: false },
   { stat: 'Block', off: `+${SCORING.offender.block}`, def: `+${SCORING.defender.block}`, neg: false },
+  { stat: 'Callahan', off: `+${SCORING.offender.callahan}`, def: `+${SCORING.defender.callahan}`, neg: false },
   { stat: 'Turnover', off: `${SCORING.offender.turnover}`, def: `${SCORING.defender.turnover}`, neg: true },
   { stat: 'Yards (per 100)', off: '+1', def: '+1', neg: false },
 ];
@@ -39,6 +40,9 @@ export function FantasyRulesContent({
   if (mode === 'event') {
     return <EventRulesContent headingId={headingId} playerLeague={playerLeague} competition={competition} />;
   }
+  // PUL doesn't record callahans; WUL's are held out until the data is checked.
+  const rows =
+    playerLeague === 'pul' || playerLeague === 'wul' ? SCORING_ROWS.filter((r) => r.stat !== 'Callahan') : SCORING_ROWS;
   return (
     <>
       <div className="mb-5">
@@ -54,7 +58,9 @@ export function FantasyRulesContent({
           player skews how their stats score — a defender&apos;s block pays{' '}
           <span className="text-ink font-semibold">{SCORING.defender.block} pts</span> vs{' '}
           <span className="text-ink font-semibold">{SCORING.offender.block} pts</span> as an
-          offender. Your lineup locks when each scoring period&apos;s first game starts, so set
+          offender, and an offender&apos;s assist pays{' '}
+          <span className="text-ink font-semibold">{SCORING.offender.assist} pts</span> vs{' '}
+          <span className="text-ink font-semibold">{SCORING.defender.assist} pts</span>. Your lineup locks when each scoring period&apos;s first game starts, so set
           it before kickoff.
         </p>
       </div>
@@ -80,7 +86,7 @@ export function FantasyRulesContent({
               </tr>
             </thead>
             <tbody>
-              {SCORING_ROWS.map((row) => (
+              {rows.map((row) => (
                 <tr key={row.stat} className="border-t border-hairline">
                   <td className="py-2.5 pr-6 font-tight text-[13px] font-medium text-ink">{row.stat}</td>
                   <td

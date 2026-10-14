@@ -25,5 +25,7 @@ export function wulRowToStatLine(row: WulStatRow): FantasyStatLine {
     blocks: row.blocks ?? 0,
     turnovers: row.turnovers ?? 0,
     yards: row.total_yards ?? (row.throw_yards ?? 0) + (row.receive_yards ?? 0),
+    // WUL callahans are held out until the data is checked (see score-fantasy).
+    callahans: 0,
   };
 }

@@ -635,64 +635,68 @@ function LeagueGrid({
           {query ? `No ${LEAGUE_LABEL[league]} teams match “${query}”.` : `No ${LEAGUE_LABEL[league]} teams available.`}
         </p>
       ) : (
-        <div
-          role="listbox"
-          aria-label={`${LEAGUE_LABEL[league]} teams`}
-          className="grid grid-cols-4 sm:grid-cols-5 gap-2.5 max-h-[280px] overflow-y-auto pr-0.5"
-        >
-          {filtered.map((team) => {
-            const ref = formatAvatarIcon(league, team.id);
-            const selected = ref === currentRef;
-            const saving = ref === savingRef;
-            return (
-              <button
-                key={team.id}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                title={team.name}
-                onClick={() => onPick(league, team)}
-                disabled={busy}
-                className={[
-                  'group relative aspect-square rounded-card-sm overflow-hidden flex items-center justify-center',
-                  'cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  selected
-                    ? 'ring-2 ring-accent'
-                    : 'ring-1 ring-hairline hover:ring-ink/25',
-                  busy ? 'opacity-60 cursor-not-allowed' : '',
-                ].join(' ')}
-              >
-                {league === 'wfdf' ? (
-                  <span className="w-full h-full flex items-center justify-center bg-ink/[0.04]">
-                    <WfdfFlag countryCode={team.countryCode ?? null} size={30} />
-                  </span>
-                ) : team.logoUrl ? (
-                  <span className="w-full h-full flex items-center justify-center bg-white">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={team.logoUrl}
-                      alt={team.name}
-                      className="w-full h-full object-contain p-1.5"
-                      loading="lazy"
-                    />
-                  </span>
-                ) : (
-                  <span className="w-full h-full flex items-center justify-center bg-ink text-bg text-[11px] font-bold">
-                    {monogram(team.name)}
-                  </span>
-                )}
+        // The cap + scroll live on a wrapper: iOS Safari collapses aspect-square
+        // rows to near zero when the grid itself is height-capped.
+        <div className="max-h-[300px] overflow-y-auto pr-0.5">
+          <div
+            role="listbox"
+            aria-label={`${LEAGUE_LABEL[league]} teams`}
+            className="grid grid-cols-4 sm:grid-cols-5 gap-2.5"
+          >
+            {filtered.map((team) => {
+              const ref = formatAvatarIcon(league, team.id);
+              const selected = ref === currentRef;
+              const saving = ref === savingRef;
+              return (
+                <button
+                  key={team.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  title={team.name}
+                  onClick={() => onPick(league, team)}
+                  disabled={busy}
+                  className={[
+                    'group relative aspect-square rounded-card-sm overflow-hidden flex items-center justify-center',
+                    'cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    selected
+                      ? 'ring-2 ring-accent'
+                      : 'ring-1 ring-hairline hover:ring-ink/25',
+                    busy ? 'opacity-60 cursor-not-allowed' : '',
+                  ].join(' ')}
+                >
+                  {league === 'wfdf' ? (
+                    <span className="w-full h-full flex items-center justify-center bg-ink/[0.04]">
+                      <WfdfFlag countryCode={team.countryCode ?? null} size={30} />
+                    </span>
+                  ) : team.logoUrl ? (
+                    <span className="w-full h-full flex items-center justify-center bg-white">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={team.logoUrl}
+                        alt={team.name}
+                        className="w-full h-full object-contain p-1.5"
+                        loading="lazy"
+                      />
+                    </span>
+                  ) : (
+                    <span className="w-full h-full flex items-center justify-center bg-ink text-bg text-[11px] font-bold">
+                      {monogram(team.name)}
+                    </span>
+                  )}
 
-                {saving && (
-                  <span className="absolute inset-0 flex items-center justify-center bg-surface/70">
-                    <span
-                      className="w-4 h-4 rounded-full border-2 border-ink/20 border-t-accent animate-spin"
-                      aria-hidden="true"
-                    />
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                  {saving && (
+                    <span className="absolute inset-0 flex items-center justify-center bg-surface/70">
+                      <span
+                        className="w-4 h-4 rounded-full border-2 border-ink/20 border-t-accent animate-spin"
+                        aria-hidden="true"
+                      />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

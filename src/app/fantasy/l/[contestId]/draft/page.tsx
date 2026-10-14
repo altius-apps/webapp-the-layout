@@ -27,6 +27,7 @@ export default async function LeagueDraftRoomPage({ params }: { params: { contes
       teams={standings.map((s) => ({
         id: s.teamId,
         teamName: s.teamName,
+        ownerId: s.ownerId,
         ownerDisplayName: s.ownerDisplayName,
         ownerUsername: s.ownerUsername,
       }))}

@@ -13,7 +13,7 @@
 // denormalizes nothing and PUL simply falls back to initials until the map is
 // supplied. (The settings surface, which already lists PUL, supplies it.)
 
-import { resolveAvatarIcon } from '@/lib/profile/avatar-icon';
+import { resolveAvatarIcon, type ResolvedIcon } from '@/lib/profile/avatar-icon';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 
 export function AvatarIconView({
@@ -28,7 +28,12 @@ export function AvatarIconView({
 }) {
   const resolved = resolveAvatarIcon(icon, pulLogos);
   if (!resolved) return null;
+  return <ResolvedIconView resolved={resolved} size={size} />;
+}
 
+/** Renders an icon the caller already resolved (the draft room resolves every
+ *  owner's icon once, PUL included). */
+export function ResolvedIconView({ resolved, size }: { resolved: NonNullable<ResolvedIcon>; size: number }) {
   if (resolved.kind === 'flag') {
     return (
       <span

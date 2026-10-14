@@ -13,13 +13,13 @@
 //
 // Competition sources:
 //   ufa  — ufa_game_player_stats per native week           (full statline)
-//   pul  — pul_game_player_stats per week_label            (no yards)
-//   wul  — wul_game_player_stats per synthesized week      (Monday buckets,
+//   pul  — pul_game_player_stats per week_label            (no yards, no callahans)
+//   wul  — wul_game_player_stats per synthesized week      (no callahans — see wulWeekLines; Monday buckets,
 //          'week-N' by chronological order — MIRRORS fantasy_rebuild_contest_periods)
-//   usau — usau_player_event_stats event totals (G/A only; no placement bonus
-//          in v1 — final_placement coverage is too sparse to be fair)
+//   usau — usau_player_event_stats event totals (G/A) + usau_event_teams
+//          final_placement bonus
 //   wfdf — wfdf_rosters event totals (G/A/callahans) + final_standing bonus
-//   euf  — euf_rosters event totals (G/A only; no placement bonus — mirrors USAU)
+//   euf  — euf_rosters event totals (G/A) + euf_teams final_placement bonus
 //
 // Scope rule (unchanged, confirmed 2026-07-05): a period scores the roster
 // saved FOR that period. No roster → no row (0). New teams start scoring from
@@ -37,12 +37,12 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 // ── Scoring matrices (keep in lockstep with src/lib/fantasy/) ────────────────
 type FantasyRole = 'offender' | 'defender' | 'flex';
 const SCORING = {
-  offender: { goal: 3, assist: 3, block: 2, turnover: -1 },
-  defender: { goal: 2, assist: 2, block: 5, turnover: -1 },
+  offender: { goal: 3, assist: 3, block: 3, turnover: -1, callahan: 10 },
+  defender: { goal: 3, assist: 2, block: 5, turnover: -1, callahan: 10 },
   yardsPerPoint: 100,
 } as const;
 
-const EVENT_SCORING = { goal: 3, assist: 3, callahan: 5 } as const;
+const EVENT_SCORING = { goal: 3, assist: 3, callahan: 10 } as const;
 
 // USAU/WFDF/EUCS player ids are uuids (usau_player_event_stats.player_id,
 // wfdf_rosters.id, euf_rosters.id): one junk id in an .in() list makes
@@ -51,10 +51,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function placementBonus(placement: number | null | undefined): number {
   if (placement == null || placement < 1) return 0;
-  if (placement === 1) return 30;
-  if (placement === 2) return 20;
-  if (placement <= 4) return 12;
-  if (placement <= 8) return 6;
+  if (placement === 1) return 10;
+  if (placement === 2) return 6;
+  if (placement <= 4) return 3;
+  if (placement <= 8) return 1;
   return 0;
 }
 
@@ -64,6 +64,7 @@ interface StatLine {
   blocks: number;
   turnovers: number;
   yards: number;
+  callahans: number;
 }
 
 function scoreStatLine(line: StatLine, role: 'offender' | 'defender'): number {
@@ -73,6 +74,7 @@ function scoreStatLine(line: StatLine, role: 'offender' | 'defender'): number {
     line.assists * v.assist +
     line.blocks * v.block +
     line.turnovers * v.turnover +
+    line.callahans * v.callahan +
     line.yards / SCORING.yardsPerPoint
   );
 }
@@ -162,12 +164,13 @@ function addLine(
     per = new Map();
     weekLines.set(period, per);
   }
-  const line = per.get(key) ?? { goals: 0, assists: 0, blocks: 0, turnovers: 0, yards: 0 };
+  const line = per.get(key) ?? { goals: 0, assists: 0, blocks: 0, turnovers: 0, yards: 0, callahans: 0 };
   line.goals += add.goals;
   line.assists += add.assists;
   line.blocks += add.blocks;
   line.turnovers += add.turnovers;
   line.yards += add.yards;
+  line.callahans += add.callahans;
   per.set(key, line);
 }
 
@@ -188,7 +191,7 @@ async function ufaWeekLines(supabase: SupabaseClient, year: number): Promise<Wee
     const stats = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('ufa_game_player_stats')
-        .select('game_id, player_id, goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received')
+        .select('game_id, player_id, goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, callahans')
         .in('game_id', part)
         .order('game_id')
         .range(from, to),
@@ -202,6 +205,7 @@ async function ufaWeekLines(supabase: SupabaseClient, year: number): Promise<Wee
         blocks: s.blocks ?? 0,
         turnovers: (s.throwaways ?? 0) + (s.drops ?? 0) + (s.stalls ?? 0),
         yards: (s.yards_thrown ?? 0) + (s.yards_received ?? 0),
+        callahans: s.callahans ?? 0,
       });
     }
   }
@@ -238,6 +242,7 @@ async function pulWeekLines(supabase: SupabaseClient, season: number): Promise<W
         blocks: s.blocks ?? 0,
         turnovers: s.turnovers ?? 0,
         yards: 0, // PUL tracks no yardage
+        callahans: 0, // or callahans
       });
     }
   }
@@ -292,6 +297,10 @@ async function wulWeekLines(supabase: SupabaseClient, season: number): Promise<W
         blocks: s.blocks ?? 0,
         turnovers: s.turnovers ?? 0,
         yards: s.total_yards ?? (s.throw_yards ?? 0) + (s.receive_yards ?? 0),
+        // Held out (Hunter 2026-10-14): wul_game_player_stats.callahans runs ~5x
+        // UFA's per-game rate and most have no matching goal. Revisit before
+        // scoring them (vault: Fantasy Feature.md, 2026-10-14).
+        callahans: 0,
       });
     }
   }
@@ -309,25 +318,38 @@ async function usauEventPoints(
   const ids = playerIds.filter((id) => UUID_RE.test(id));
   if (ids.length === 0) return out;
 
-  // NO placement bonus for USAU in v1: usau_event_teams.final_placement
-  // coverage is sparse/inconsistent (verified 2026-08-15 — e.g. 42/48 at 2025
-  // Club Nats, 0–8/40 at College), so a bonus would pay some teams and
-  // silently skip others in the SAME event. G/A only until placement
-  // derivation is built. WFDF keeps its bonus (final_standing is complete).
+  // Placement bonus (Hunter 2026-10-14). final_placement is per division and
+  // only the top 8 earn a bonus; 2025 Club Nats has 1–8 in all 3 divisions
+  // (only 9th+ are missing), and a team with no placement simply gets 0.
+  const teams = await fetchAll<{ team_id: string; final_placement: number | null }>((from, to) =>
+    supabase
+      .from('usau_event_teams')
+      .select('team_id, final_placement')
+      .eq('event_id', eventId)
+      .order('team_id')
+      .range(from, to),
+  );
+  const placementOf = new Map(teams.map((t) => [t.team_id, t.final_placement]));
 
-  // Event stat totals (G/A only — that's all USAU publishes).
+  // Event stat totals (G/A only — that's all USAU publishes). The bonus is
+  // added once per player, not per stat row.
+  const bonused = new Set<string>();
   for (const part of chunk(ids, 150)) {
     const stats = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('usau_player_event_stats')
-        .select('player_id, goals, assists')
+        .select('player_id, team_id, goals, assists')
         .eq('event_id', eventId)
         .in('player_id', part)
         .order('player_id')
         .range(from, to),
     );
     for (const s of stats) {
-      const pts = (s.goals ?? 0) * EVENT_SCORING.goal + (s.assists ?? 0) * EVENT_SCORING.assist;
+      let pts = (s.goals ?? 0) * EVENT_SCORING.goal + (s.assists ?? 0) * EVENT_SCORING.assist;
+      if (!bonused.has(s.player_id)) {
+        bonused.add(s.player_id);
+        pts += placementBonus(placementOf.get(s.team_id));
+      }
       out.set(s.player_id, (out.get(s.player_id) ?? 0) + pts);
     }
   }
@@ -343,20 +365,32 @@ async function eufEventPoints(
   const ids = playerIds.filter((id) => UUID_RE.test(id));
   if (ids.length === 0) return out;
 
-  // No placement bonus for EUF in v1 — mirrors USAU (no final-standing data
-  // ingested for EUCS yet). G/A only.
+  // G/A + placement bonus from euf_teams.final_placement (Hunter 2026-10-14).
+  const teams = await fetchAll<{ id: string; final_placement: number | null }>((from, to) =>
+    supabase
+      .from('euf_teams')
+      .select('id, final_placement')
+      .eq('event_id', eventId)
+      .order('id')
+      .range(from, to),
+  );
+  const placementOf = new Map(teams.map((t) => [t.id, t.final_placement]));
+
   for (const part of chunk(ids, 150)) {
     const rows = await fetchAll<Record<string, any>>((from, to) =>
       supabase
         .from('euf_rosters')
-        .select('id, event_id, goals, assists')
+        .select('id, event_id, team_id, goals, assists')
         .eq('event_id', eventId)
         .in('id', part)
         .order('id')
         .range(from, to),
     );
     for (const r of rows) {
-      const pts = (r.goals ?? 0) * EVENT_SCORING.goal + (r.assists ?? 0) * EVENT_SCORING.assist;
+      const pts =
+        (r.goals ?? 0) * EVENT_SCORING.goal +
+        (r.assists ?? 0) * EVENT_SCORING.assist +
+        placementBonus(placementOf.get(r.team_id));
       out.set(r.id, pts);
     }
   }

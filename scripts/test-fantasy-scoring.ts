@@ -10,6 +10,7 @@
 
 import { scoreStatLine, sumPoints, roundPoints, type FantasyStatLine } from '../src/lib/fantasy/scoring';
 import { ufaRowToStatLine } from '../src/lib/fantasy/ufa-adapter';
+import { placementBonus, scoreEventLine } from '../src/lib/fantasy/event-adapter';
 import {
   buildWeeks,
   activeWeek,
@@ -48,42 +49,61 @@ function approx(actual: number, expected: number, label: string, tol = 1e-9) {
 console.log('\nScoring matrix:');
 {
   // 1 goal, 1 assist, 1 block, 0 turnovers, 0 yards
-  const line: FantasyStatLine = { goals: 1, assists: 1, blocks: 1, turnovers: 0, yards: 0 };
-  // Offender: 3 + 3 + 2 = 8
-  approx(scoreStatLine(line, 'offender'), 8, 'offender G1 A1 B1 = 8');
-  // Defender: 2 + 2 + 5 = 9
-  approx(scoreStatLine(line, 'defender'), 9, 'defender G1 A1 B1 = 9');
+  const line: FantasyStatLine = { goals: 1, assists: 1, blocks: 1, turnovers: 0, yards: 0, callahans: 0 };
+  // Offender: 3 + 3 + 3 = 9
+  approx(scoreStatLine(line, 'offender'), 9, 'offender G1 A1 B1 = 9');
+  // Defender: 3 + 2 + 5 = 10
+  approx(scoreStatLine(line, 'defender'), 10, 'defender G1 A1 B1 = 10');
 }
 {
   // Block is where the roles diverge most: 3 blocks
-  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 3, turnovers: 0, yards: 0 };
-  approx(scoreStatLine(line, 'offender'), 6, 'offender 3 blocks = 6');
+  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 3, turnovers: 0, yards: 0, callahans: 0 };
+  approx(scoreStatLine(line, 'offender'), 9, 'offender 3 blocks = 9');
   approx(scoreStatLine(line, 'defender'), 15, 'defender 3 blocks = 15');
 }
 {
   // Turnovers: -1 each, both roles
-  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 0, turnovers: 4, yards: 0 };
+  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 0, turnovers: 4, yards: 0, callahans: 0 };
   approx(scoreStatLine(line, 'offender'), -4, 'offender 4 turnovers = -4');
   approx(scoreStatLine(line, 'defender'), -4, 'defender 4 turnovers = -4');
 }
 {
   // Yards: 1 pt / 100, decimals, role-neutral
-  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 0, turnovers: 0, yards: 250 };
+  const line: FantasyStatLine = { goals: 0, assists: 0, blocks: 0, turnovers: 0, yards: 250, callahans: 0 };
   approx(scoreStatLine(line, 'offender'), 2.5, 'offender 250 yds = 2.5');
   approx(scoreStatLine(line, 'defender'), 2.5, 'defender 250 yds = 2.5');
 }
 {
   // Combined realistic line: G1 A4 B2 TO1, 496 yds (tdecraene @ 2026-06-20-PHI-BOS)
-  const line: FantasyStatLine = { goals: 1, assists: 4, blocks: 2, turnovers: 1, yards: 265 + 231 };
-  // Offender: 1*3 + 4*3 + 2*2 + 1*(-1) + 496/100 = 3+12+4-1+4.96 = 22.96
-  approx(scoreStatLine(line, 'offender'), 22.96, 'offender realistic line = 22.96');
-  // Defender: 1*2 + 4*2 + 2*5 + 1*(-1) + 4.96 = 2+8+10-1+4.96 = 23.96
-  approx(scoreStatLine(line, 'defender'), 23.96, 'defender realistic line = 23.96');
+  const line: FantasyStatLine = { goals: 1, assists: 4, blocks: 2, turnovers: 1, yards: 265 + 231, callahans: 0 };
+  // Offender: 1*3 + 4*3 + 2*3 + 1*(-1) + 496/100 = 3+12+6-1+4.96 = 24.96
+  approx(scoreStatLine(line, 'offender'), 24.96, 'offender realistic line = 24.96');
+  // Defender: 1*3 + 4*2 + 2*5 + 1*(-1) + 4.96 = 3+8+10-1+4.96 = 24.96
+  approx(scoreStatLine(line, 'defender'), 24.96, 'defender realistic line = 24.96');
+}
+{
+  // Callahan: +10 on top of the goal it also counts as, both roles
+  const line: FantasyStatLine = { goals: 1, assists: 0, blocks: 1, turnovers: 0, yards: 0, callahans: 1 };
+  approx(scoreStatLine(line, 'offender'), 16, 'offender callahan (G1 B1 C1) = 16');
+  approx(scoreStatLine(line, 'defender'), 18, 'defender callahan (G1 B1 C1) = 18');
 }
 {
   // Missing fields default to 0 (leagues without yardage etc.)
   const line = { goals: 2, assists: 0, blocks: 0, turnovers: 0, yards: 0 } as FantasyStatLine;
   approx(scoreStatLine(line, 'offender'), 6, 'offender 2 goals only = 6');
+}
+
+// ─── Event scoring: G/A/callahans + team placement ───────────────────────────
+console.log('\nEvent scoring:');
+{
+  approx(placementBonus(1), 10, 'champion = 10');
+  approx(placementBonus(2), 6, 'runner-up = 6');
+  approx(placementBonus(4), 3, 'semifinalist = 3');
+  approx(placementBonus(8), 1, 'quarterfinalist = 1');
+  approx(placementBonus(9), 0, '9th = 0');
+  approx(placementBonus(null), 0, 'unknown placement = 0');
+  // G2 A1 C1, champion: 2*3 + 1*3 + 1*10 + 10 = 29
+  approx(scoreEventLine({ goals: 2, assists: 1, callahans: 1 }, 1), 29, 'G2 A1 C1 champion = 29');
 }
 
 // ─── UFA adapter: turnovers + yards derivation ───────────────────────────────
@@ -92,14 +112,14 @@ console.log('\nUFA adapter:');
   const row = {
     goals: 1, assists: 4, blocks: 2,
     throwaways: 1, drops: 0, stalls: 0,
-    yards_thrown: 265, yards_received: 231,
+    yards_thrown: 265, yards_received: 231, callahans: 0,
   };
   const line = ufaRowToStatLine(row);
-  eq(line, { goals: 1, assists: 4, blocks: 2, turnovers: 1, yards: 496 }, 'row → statline (TO=1, yards=496)');
+  eq(line, { goals: 1, assists: 4, blocks: 2, turnovers: 1, yards: 496, callahans: 0 }, 'row → statline (TO=1, yards=496)');
 }
 {
   // turnovers sums all three components
-  const row = { goals: 0, assists: 0, blocks: 0, throwaways: 2, drops: 1, stalls: 1, yards_thrown: 0, yards_received: 0 };
+  const row = { goals: 0, assists: 0, blocks: 0, throwaways: 2, drops: 1, stalls: 1, yards_thrown: 0, yards_received: 0, callahans: 0 };
   eq(ufaRowToStatLine(row).turnovers, 4, 'turnovers = throwaways+drops+stalls');
 }
 

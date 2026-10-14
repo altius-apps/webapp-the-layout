@@ -458,7 +458,7 @@ export async function previewContestPlayerPoints(
   if (league === 'ufa') {
     const { data, error } = await anon()
       .from('ufa_game_player_stats')
-      .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(year)')
+      .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, callahans, ufa_games!inner(year)')
       .eq('player_id', playerId)
       .eq('ufa_games.year', contest.seasonYear);
     if (error) throw new Error(error.message);
@@ -472,6 +472,7 @@ export async function previewContestPlayerPoints(
           blocks: r.blocks ?? 0,
           turnovers: (r.throwaways ?? 0) + (r.drops ?? 0) + (r.stalls ?? 0),
           yards: (r.yards_thrown ?? 0) + (r.yards_received ?? 0),
+          callahans: r.callahans ?? 0,
         },
         role,
       );
@@ -499,6 +500,8 @@ export async function previewContestPlayerPoints(
           blocks: r.blocks ?? 0,
           turnovers: r.turnovers ?? 0,
           yards: league === 'wul' ? (r.yards_total as number | null) ?? 0 : 0,
+          // PUL has none; WUL's are held out until the data is checked (see score-fantasy).
+          callahans: 0,
         },
         role,
       );

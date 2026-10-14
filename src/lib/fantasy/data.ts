@@ -77,6 +77,7 @@ export interface WeekBreakdown {
 export interface LeaderboardRow {
   teamId: string;
   teamName: string;
+  ownerId: string;
   ownerDisplayName: string | null;
   ownerUsername: string | null;
   totalPoints: number;
@@ -127,7 +128,7 @@ export async function getTeamWeekBreakdown(
   const { data: statRows } = await anon()
     .from('ufa_game_player_stats')
     .select(
-      'player_id, goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(week, year)',
+      'player_id, goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, callahans, ufa_games!inner(week, year)',
     )
     .in('player_id', playerIds)
     .eq('ufa_games.week', week)
@@ -361,7 +362,7 @@ export async function playerSeasonPreview(
 ): Promise<number> {
   const { data, error } = await anon()
     .from('ufa_game_player_stats')
-    .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(year)')
+    .select('goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, callahans, ufa_games!inner(year)')
     .eq('player_id', playerId)
     .eq('ufa_games.year', year);
   if (error) throw new Error(error.message);

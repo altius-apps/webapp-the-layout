@@ -4,8 +4,8 @@
 // FantasyStatLine. PUL is simpler than UFA:
 //   • `turnovers` is already a single upstream column (no throwaway/drop/stall
 //     split to sum)
-//   • PUL tracks NO yardage → yards: 0 (the matrix's yardage term contributes
-//     nothing, by design — see scoring.ts header)
+//   • PUL tracks NO yardage or callahans → yards: 0, callahans: 0 (those
+//     terms contribute nothing, by design — see scoring.ts header)
 
 import type { FantasyStatLine } from './scoring';
 
@@ -24,5 +24,6 @@ export function pulRowToStatLine(row: PulStatRow): FantasyStatLine {
     blocks: row.blocks ?? 0,
     turnovers: row.turnovers ?? 0,
     yards: 0,
+    callahans: 0,
   };
 }

@@ -4,20 +4,21 @@
 // assigned that player to a point total. Cumulative season score is just the
 // sum of per-game scores across a team's rostered players.
 //
-// Scoring matrix (confirmed with Hunter 2026-06-30):
+// Scoring matrix (Hunter 2026-10-14; was 2026-06-30):
 //
 //   Stat                         Offender   Defender
 //   ─────────────────────────────────────────────────
-//   Goal                            3           2
+//   Goal                            3           3
 //   Assist                          3           2
-//   Block                           2           5
+//   Block                           3           5
+//   Callahan (on top of the goal)  10          10
 //   Turnover (throwaway+drop+stall)  −1         −1
 //   Yards (thrown + received)     1 pt / 100 yds (decimals), both roles
 //
 // Design intent: the role a manager assigns *skews* the payout. Defenders are
-// rewarded for defensive plays (a block is worth 5 vs 2); offenders for
-// offensive production. Turnovers cost a point regardless of role. Yardage is
-// role-neutral. Missing yardage (leagues without yard data) contributes 0.
+// rewarded for blocks (5 vs 3); offenders for assists (3 vs 2). Turnovers cost
+// a point regardless of role. Yardage is role-neutral. Stats a league doesn't
+// track (PUL: yards, callahans) contribute 0.
 
 export type FantasyRole = 'offender' | 'defender';
 
@@ -38,12 +39,13 @@ export interface FantasyStatLine {
   turnovers: number;
   /** Combined throwing + receiving yards. */
   yards: number;
+  callahans: number;
 }
 
 /** Point values per stat, per role. Single source of truth for the matrix. */
 export const SCORING = {
-  offender: { goal: 3, assist: 3, block: 2, turnover: -1 },
-  defender: { goal: 2, assist: 2, block: 5, turnover: -1 },
+  offender: { goal: 3, assist: 3, block: 3, turnover: -1, callahan: 10 },
+  defender: { goal: 3, assist: 2, block: 5, turnover: -1, callahan: 10 },
   /** Points per yard (role-neutral): 1 point per 100 combined yards. */
   yardsPerPoint: 100,
 } as const;
@@ -61,7 +63,8 @@ export function scoreStatLine(line: FantasyStatLine, role: FantasyRole): number 
     (line.goals ?? 0) * v.goal +
     (line.assists ?? 0) * v.assist +
     (line.blocks ?? 0) * v.block +
-    (line.turnovers ?? 0) * v.turnover;
+    (line.turnovers ?? 0) * v.turnover +
+    (line.callahans ?? 0) * v.callahan;
   const yardPoints = (line.yards ?? 0) / SCORING.yardsPerPoint;
   return counting + yardPoints;
 }

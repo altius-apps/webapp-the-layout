@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
 import { auctionTeamState, type Draft, type DraftPick } from '@/lib/fantasy/draft-room';
 import type { ContestView } from '@/lib/fantasy/leagues';
+import type { ResolvedIcon } from '@/lib/profile/avatar-icon';
 import { ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
 import { LeagueFeed } from '../league-feed';
 import { RatingLine } from '../player-rating';
@@ -20,6 +21,7 @@ import type { RoomTab } from './room-tabs';
 export interface RoomTeam {
   id: string;
   teamName: string;
+  ownerIcon?: ResolvedIcon;
 }
 
 const CARD = 'bg-surface rounded-card-lg shadow-card';
@@ -145,7 +147,7 @@ function DraftOrder({ draft, teams, myTeamId }: { draft: Draft; teams: RoomTeam[
           className={['flex items-center gap-3 px-4 py-2.5', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
         >
           <span className="w-5 flex-shrink-0 text-right font-tight text-[12px] font-bold text-faint tabular">{idx + 1}</span>
-          <TeamAvatar id={id} name={byId.get(id)?.teamName ?? 'Team'} size="sm" />
+          <TeamAvatar name={byId.get(id)?.teamName ?? 'Team'} icon={byId.get(id)?.ownerIcon} size="sm" />
           <span className="min-w-0 flex-1 truncate font-tight text-[13.5px] font-semibold text-ink">
             {byId.get(id)?.teamName ?? 'Team'}
           </span>

@@ -54,7 +54,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
-import { getMyLeagueRole } from '@/lib/fantasy/leagues';
+import { getMyLeagueRole, getOwnerAvatarIcons } from '@/lib/fantasy/leagues';
+import { resolveAvatarIcon, type ResolvedIcon } from '@/lib/profile/avatar-icon';
 import {
   getDraft,
   getDraftPicks,
@@ -115,8 +116,11 @@ import {
 interface TeamInfo {
   id: string;
   teamName: string;
+  ownerId: string;
   ownerDisplayName: string | null;
   ownerUsername: string | null;
+  /** The owner's picked profile icon, loaded in the room (signed-in only). */
+  ownerIcon?: ResolvedIcon;
 }
 
 interface Props {
@@ -137,7 +141,7 @@ function formatDraftDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
+export function DraftRoom({ contest, leagueName, teams: serverTeams, basePath }: Props) {
   const { user, loading: authLoading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -167,6 +171,35 @@ export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
   const [pickedTab, setPickedTab] = useState<RoomTab | null>(null);
   const [snap, setSnap] = useState<SheetSnap>('peek');
   const [isCommissioner, setIsCommissioner] = useState(false);
+
+  // Owners' picked profile icons replace the board monograms. profiles is
+  // readable only when signed in, so signed-out viewers keep the monograms. PUL
+  // logos are only known after a DB read, so they're fetched just when needed.
+  const [ownerIcons, setOwnerIcons] = useState<Map<string, ResolvedIcon>>(() => new Map());
+  useEffect(() => {
+    if (!user) {
+      setOwnerIcons(new Map());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const refs = await getOwnerAvatarIcons(serverTeams.map((t) => t.ownerId));
+      let pulLogos: Map<string, { name: string; logoUrl: string | null }> | undefined;
+      if ([...refs.values()].some((r) => r.startsWith('pul:'))) {
+        const { listPulTeams } = await import('@/lib/pul/data');
+        pulLogos = new Map((await listPulTeams()).map((t) => [t.id, { name: t.name, logoUrl: t.logoUrl }]));
+      }
+      if (cancelled) return;
+      setOwnerIcons(new Map(serverTeams.map((t) => [t.id, resolveAvatarIcon(refs.get(t.ownerId), pulLogos)])));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, serverTeams]);
+  const teams = useMemo(
+    () => serverTeams.map((t) => ({ ...t, ownerIcon: ownerIcons.get(t.id) })),
+    [serverTeams, ownerIcons],
+  );
 
   const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
   const draftedByKey = useMemo(
@@ -298,7 +331,7 @@ export function DraftRoom({ contest, leagueName, teams, basePath }: Props) {
       return;
     }
     getMyContestTeam(contest.id)
-      .then((t) => setMyTeam(t ? teamById.get(t.id) ?? { ...t, ownerDisplayName: null, ownerUsername: null } : null))
+      .then((t) => setMyTeam(t ? teamById.get(t.id) ?? { ...t, ownerId: user.id, ownerDisplayName: null, ownerUsername: null } : null))
       .catch(() => setMyTeam(null));
   }, [user, contest.id, teamById]);
 
@@ -986,6 +1019,7 @@ function LiveRoom({
           remainingMs={remainingMs}
           onClockTeamId={onClockTeamId}
           onClockTeamName={onClockTeam?.teamName ?? 'Team'}
+          onClockTeamIcon={onClockTeam?.ownerIcon}
           onClockAuto={!!onClockTeamId && autodraftTeamIds.has(onClockTeamId)}
           isMyClock={isMyClock}
           myTeamId={myTeam?.id ?? null}
@@ -1090,6 +1124,7 @@ function ClockStrip({
   remainingMs,
   onClockTeamId,
   onClockTeamName,
+  onClockTeamIcon,
   onClockAuto,
   isMyClock,
   myTeamId,
@@ -1100,6 +1135,7 @@ function ClockStrip({
   remainingMs: number | null;
   onClockTeamId: string | null;
   onClockTeamName: string;
+  onClockTeamIcon?: ResolvedIcon;
   onClockAuto: boolean;
   isMyClock: boolean;
   myTeamId: string | null;
@@ -1129,7 +1165,7 @@ function ClockStrip({
             </span>
           ) : (
             <div className="flex h-8 min-w-0 max-w-full items-center gap-2.5">
-              <TeamAvatar id={onClockTeamId ?? ''} name={onClockTeamName} size="sm" />
+              <TeamAvatar name={onClockTeamName} icon={onClockTeamIcon} size="sm" />
               <div className="min-w-0">
                 <span className="block font-tight text-[9.5px] font-bold uppercase leading-none tracking-[0.14em] text-muted">
                   On the clock
@@ -1515,6 +1551,7 @@ function SnakeBoard({
       draft.draftOrder.map((id) => ({
         id,
         name: teamById.get(id)?.teamName ?? 'Team',
+        icon: teamById.get(id)?.ownerIcon,
         auto: autodraftTeamIds?.has(id) ?? false,
       })),
     [draft.draftOrder, teamById, autodraftTeamIds],

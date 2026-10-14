@@ -43,6 +43,8 @@ export async function getProjections(contestId: string): Promise<ProjectionMap> 
       blocks: Number(r.blocks ?? 0),
       turnovers: Number(r.turnovers ?? 0),
       yards: Number(r.yards ?? 0),
+      // fantasy_player_projections returns no callahan average.
+      callahans: 0,
     };
     out.set(projectionKey(p.playerLeague, p.playerId), p);
   }

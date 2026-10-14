@@ -20,6 +20,7 @@ export interface UfaStatRow {
   stalls: number;
   yards_thrown: number;
   yards_received: number;
+  callahans: number;
 }
 
 export function ufaRowToStatLine(row: UfaStatRow): FantasyStatLine {
@@ -29,5 +30,6 @@ export function ufaRowToStatLine(row: UfaStatRow): FantasyStatLine {
     blocks: row.blocks ?? 0,
     turnovers: (row.throwaways ?? 0) + (row.drops ?? 0) + (row.stalls ?? 0),
     yards: (row.yards_thrown ?? 0) + (row.yards_received ?? 0),
+    callahans: row.callahans ?? 0,
   };
 }

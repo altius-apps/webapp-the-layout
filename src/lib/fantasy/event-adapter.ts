@@ -10,11 +10,14 @@
 //   ─────────────────────────────
 //   Goal                    3
 //   Assist                  3
-//   Callahan                5   (WFDF only — USAU doesn't track them)
-//   Team wins the event    30
-//   Runner-up              20
-//   Semis (3rd–4th)        12
-//   Quarters (5th–8th)      6
+//   Callahan               10   (WFDF only — USAU/EUCS don't track them)
+//   Team wins the event    10
+//   Runner-up               6
+//   Semis (3rd–4th)         3
+//   Quarters (5th–8th)      1
+//
+// Values and the USAU/EUCS placement bonus: Hunter 2026-10-14 (was 30/20/12/6,
+// WFDF only).
 //
 // Placement is passed in as the team's final placement (1 = champion) or null
 // when unknown — a null placement simply contributes 0, so contests still score
@@ -33,16 +36,16 @@ export interface EventStatLine {
 export const EVENT_SCORING = {
   goal: 3,
   assist: 3,
-  callahan: 5,
+  callahan: 10,
 } as const;
 
 /** Placement bonus by the player's team's final placement (1 = champion). */
 export function placementBonus(placement: number | null | undefined): number {
   if (placement == null || placement < 1) return 0;
-  if (placement === 1) return 30;
-  if (placement === 2) return 20;
-  if (placement <= 4) return 12;
-  if (placement <= 8) return 6;
+  if (placement === 1) return 10;
+  if (placement === 2) return 6;
+  if (placement <= 4) return 3;
+  if (placement <= 8) return 1;
   return 0;
 }
 

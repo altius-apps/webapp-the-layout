@@ -221,7 +221,7 @@ export function periodsToWeeks(periods: ContestPeriod[], now: Date = new Date())
 export async function getContestStandings(contestId: string): Promise<LeaderboardRow[]> {
   const { data: teams, error } = await anon()
     .from('fantasy_teams')
-    .select('id, team_name, owner_display_name, owner_username')
+    .select('id, team_name, owner_id, owner_display_name, owner_username')
     .eq('contest_id', contestId)
     .limit(500);
   if (error) throw new Error(error.message);
@@ -243,11 +243,26 @@ export async function getContestStandings(contestId: string): Promise<Leaderboar
     .map((t: Record<string, unknown>) => ({
       teamId: t.id as string,
       teamName: t.team_name as string,
+      ownerId: t.owner_id as string,
       ownerDisplayName: (t.owner_display_name as string) ?? null,
       ownerUsername: (t.owner_username as string) ?? null,
       totalPoints: roundPoints(totals.get(t.id as string) ?? 0),
     }))
     .sort((a, b) => b.totalPoints - a.totalPoints);
+}
+
+/** Team owners' picked profile icons ("league:teamId" refs), keyed by owner id.
+ *  profiles is readable only when signed in, so a signed-out viewer gets an
+ *  empty map. */
+export async function getOwnerAvatarIcons(ownerIds: string[]): Promise<Map<string, string>> {
+  if (ownerIds.length === 0) return new Map();
+  const { data, error } = await sessionClient()
+    .from('profiles')
+    .select('id, avatar_icon')
+    .in('id', ownerIds)
+    .not('avatar_icon', 'is', null);
+  if (error) throw new Error(error.message);
+  return new Map((data ?? []).map((p: Record<string, unknown>) => [p.id as string, p.avatar_icon as string]));
 }
 
 // ─── Contest team (public, competition-agnostic) ─────────────────────────────

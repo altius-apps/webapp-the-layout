@@ -20,6 +20,8 @@
 // Tiles are always-light faces with dark navy text, in both app themes.
 
 import { useEffect, useRef } from 'react';
+import type { ResolvedIcon } from '@/lib/profile/avatar-icon';
+import { ResolvedIconView } from '@/components/profile/avatar-icon-view';
 import { AutoBadge } from './autodraft';
 
 export type BoardTone = 'r1' | 'r2' | 'r3' | 'r4' | 'none';
@@ -27,6 +29,8 @@ export type BoardTone = 'r1' | 'r2' | 'r3' | 'r4' | 'none';
 export interface BoardColumn {
   id: string;
   name: string;
+  /** The owner's picked profile icon; the monogram when absent. */
+  icon?: ResolvedIcon;
   /** Extra line under the name (auction: max bid + budget left). */
   detail?: React.ReactNode;
   /** Replaces the avatar with a round badge (auction: this team's live bid). */
@@ -105,18 +109,7 @@ function splitName(full: string): { first: string; last: string } {
   return { first: parts[0], last: parts.slice(1).join(' ') };
 }
 
-// ─── Team avatar (monogram; teams have no logos) ────────────────────────────
-
-const AVATAR_TONES = [
-  'bg-[#4F7CFF] text-white',
-  'bg-[#14B8A6] text-white',
-  'bg-[#8B5CF6] text-white',
-  'bg-[#F43F5E] text-white',
-  'bg-[#F59E0B] text-[#0B1426]',
-  'bg-[#22C55E] text-[#0B1426]',
-  'bg-[#EC4899] text-white',
-  'bg-[#06B6D4] text-[#0B1426]',
-];
+// ─── Team avatar (owner's profile icon, else a monogram) ────────────────────
 
 const AVATAR_SIZE = {
   sm: 'w-7 h-7 text-[10px]',
@@ -131,16 +124,36 @@ function initials(name: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-export function TeamAvatar({ id, name, size = 'md' }: { id: string; name: string; size?: keyof typeof AVATAR_SIZE }) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+// ResolvedIconView sizes in px; md uses its lg width and the circle clips the 2px
+// overhang at phone width.
+const ICON_PX = { sm: 28, md: 36, lg: 48 };
+
+export function TeamAvatar({
+  name,
+  icon,
+  size = 'md',
+}: {
+  name: string;
+  icon?: ResolvedIcon;
+  size?: keyof typeof AVATAR_SIZE;
+}) {
+  if (icon) {
+    return (
+      <span
+        aria-hidden="true"
+        className={['flex-shrink-0 inline-flex items-center justify-center rounded-full overflow-hidden', AVATAR_SIZE[size]].join(' ')}
+      >
+        <ResolvedIconView resolved={icon} size={ICON_PX[size]} />
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden="true"
       className={[
         'flex-shrink-0 inline-flex items-center justify-center rounded-full font-tight font-extrabold tracking-[0.02em]',
         AVATAR_SIZE[size],
-        AVATAR_TONES[h % AVATAR_TONES.length],
+        'bg-ink text-bg',
       ].join(' ')}
     >
       {initials(name)}
@@ -285,7 +298,7 @@ export function DraftBoard({
                           {c.badge}
                         </span>
                       ) : (
-                        <TeamAvatar id={c.id} name={c.name} />
+                        <TeamAvatar name={c.name} icon={c.icon} />
                       )}
                       <span className="flex items-center gap-1 max-w-full min-w-0">
                         <span
