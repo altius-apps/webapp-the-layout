@@ -5,7 +5,7 @@
 // reads "{shortLabel} · Men's · {year}") → settings gear (client island:
 // resolves getMyLeagueRole; every member sees the gear — Settings holds Leave
 // league). Invite moved to the League tab's join-code card and chat to the
-// docked LeagueChatDock, so the name has the row (Hunter, 2026-10-14).
+// Chat tab, so the name has the row (Hunter, 2026-10-14).
 // Web port of the mobile app's LeagueShell.tsx header row
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueShell.tsx).
 
@@ -76,7 +76,8 @@ export function LeagueHeader({ contest, league }: Props) {
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0">
-          <h1 className="m-0 font-display italic text-[20px] lg:text-[22px] font-bold tracking-[-0.02em] leading-[1.1] text-ink truncate">
+          {/* pr: truncate's overflow clip cut off the italic's last glyph. */}
+          <h1 className="m-0 font-display italic text-[20px] lg:text-[22px] font-bold tracking-[-0.02em] leading-[1.1] text-ink truncate pr-[0.14em]">
             {title}
           </h1>
           {league?.isOfficial && <OfficialBadge />}

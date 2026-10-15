@@ -1,11 +1,13 @@
 'use client';
 
 // LeagueSectionNav — the in-league contest sub-tabs (Match/League · Team ·
-// Players · League), rendered via the shared SectionNav (route mode). Web
+// Players · Chat · League), rendered via the shared SectionNav (route mode). Web
 // port of the mobile app's contestSubTabs (altiusapps/mobileapp-thelayout ·
 // src/components/nav/league-sub-tabs.ts):
-//   weekly + h2h format → Match · Team · Players · League
-//   everything else     → League · Team · Players
+//   weekly + h2h format → Match · Team · Players · Chat · League
+//   everything else     → League · Team · Players · Chat
+// Chat is a tab on web only. The mobile app docks it at the bottom of the
+// screen instead (Hunter, 2026-10-14: deliberate difference).
 
 import { usePathname } from 'next/navigation';
 import { SectionNav, type SectionRouteTab } from '@/components/section-nav';
@@ -32,6 +34,11 @@ export function LeagueSectionNav({ contest }: { contest: ContestView }) {
     label: 'Players',
     href: `${base}/players`,
     active: pathname.startsWith(`${base}/players`),
+  });
+  tabs.push({
+    label: 'Chat',
+    href: `${base}/feed`,
+    active: pathname.startsWith(`${base}/feed`),
   });
   if (isH2HWeekly) {
     tabs.push({

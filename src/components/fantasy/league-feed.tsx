@@ -1,8 +1,8 @@
 'use client';
 
-// LeagueFeed — the feed route's body (app/fantasy/l/[contestId]/feed) and the
-// draft room's Chat tab. Its data lives in useLeagueFeed, which the docked
-// chat (league-chat-dock.tsx) shares along with the composer and rows.
+// LeagueFeed — the league's Chat tab (app/fantasy/l/[contestId]/feed) and the
+// draft room's Chat tab. Data, realtime, composer and delete state live in
+// useLeagueFeed.
 // Merged system activity + member chat, newest-first top-to-bottom (a normal
 // scrolling div, not an inverted list — the web has no bottom-pinned keyboard
 // to design around). Composer pinned above the timeline for signed-in
@@ -33,10 +33,9 @@ import {
 import { getLeagueMembers, getMyLeagueRole, type ContestView, type LeagueMember } from '@/lib/fantasy/leagues';
 
 const ACTIVITY_LIMIT = 50;
-const MESSAGE_LIMIT = 100;
 const MAX_LEN = 500;
 
-export function relativeTime(iso: string): string {
+function relativeTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const diffMs = Date.now() - d.getTime();
@@ -56,16 +55,8 @@ function activityHref(item: ActivityItem, contestId: string): string | null {
   return null;
 }
 
-export interface FeedOptions {
-  /** false = only the newest entry (the chat dock's collapsed bar). */
-  full?: boolean;
-  /** Realtime updates. */
-  live?: boolean;
-}
-
-/** League activity + chat: data, realtime, composer and delete state. Shared by
- *  LeagueFeed (the feed page and the draft room's Chat tab) and LeagueChatDock. */
-export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = true, live = true }: FeedOptions = {}) {
+/** League activity + chat: data, realtime, composer and delete state. */
+export function useLeagueFeed(leagueId: string, isOfficial: boolean) {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -78,18 +69,15 @@ export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = tr
   const [members, setMembers] = useState<LeagueMember[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const activityLimit = full ? ACTIVITY_LIMIT : 1;
-  const messageLimit = full ? MESSAGE_LIMIT : 1;
-
   const refetch = useCallback(() => {
     Promise.all([
-      getLeagueActivity(leagueId, activityLimit).catch(() => []),
-      user ? getLeagueMessages(leagueId, messageLimit).catch(() => []) : Promise.resolve([]),
+      getLeagueActivity(leagueId, ACTIVITY_LIMIT).catch(() => []),
+      user ? getLeagueMessages(leagueId).catch(() => []) : Promise.resolve([]),
     ]).then(([a, m]) => {
       setActivity(a);
       setMessages(m);
     });
-  }, [leagueId, user, activityLimit, messageLimit]);
+  }, [leagueId, user]);
 
   useEffect(() => {
     if (!user) {
@@ -109,8 +97,8 @@ export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = tr
     let cancelled = false;
     setLoading(true);
     Promise.all([
-      getLeagueActivity(leagueId, activityLimit).catch(() => []),
-      user ? getLeagueMessages(leagueId, messageLimit).catch(() => []) : Promise.resolve([]),
+      getLeagueActivity(leagueId, ACTIVITY_LIMIT).catch(() => []),
+      user ? getLeagueMessages(leagueId).catch(() => []) : Promise.resolve([]),
       // An official league can have thousands of members — never list them all.
       isOfficial ? Promise.resolve([]) : getLeagueMembers(leagueId).catch(() => []),
     ]).then(([a, m, mem]) => {
@@ -123,10 +111,10 @@ export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = tr
     return () => {
       cancelled = true;
     };
-  }, [leagueId, user, isOfficial, activityLimit, messageLimit]);
+  }, [leagueId, user, isOfficial]);
 
   useEffect(() => {
-    if (!leagueId || !live) return;
+    if (!leagueId) return;
     // An official league can have thousands of viewers: fold a burst of
     // realtime events into one refetch per 5 s per viewer.
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -143,7 +131,7 @@ export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = tr
       if (timer) clearTimeout(timer);
       unsubscribeLeagueFeed(channel);
     };
-  }, [leagueId, refetch, isOfficial, live]);
+  }, [leagueId, refetch, isOfficial]);
 
   // Official leagues: names for the people in the chat only, never the whole
   // league. Each id is asked for once (a member who left is never found).

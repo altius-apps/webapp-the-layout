@@ -1,8 +1,8 @@
 'use client';
 
 // True while a text field has focus, i.e. the phone keyboard is up. Fixed
-// bottom chrome (the app's bottom nav, the league chat dock) steps aside then,
-// or it rides up on top of the keyboard (Hunter, 2026-10-14).
+// bottom chrome (the app's bottom nav) steps aside then, or it rides up on top
+// of the keyboard (Hunter, 2026-10-14).
 
 import { useEffect, useState } from 'react';
 
