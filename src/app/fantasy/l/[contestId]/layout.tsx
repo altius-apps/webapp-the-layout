@@ -20,6 +20,7 @@ import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
 import { LeagueChrome } from '@/components/fantasy/league-chrome';
 import { EnsureContestTeam } from '@/components/fantasy/ensure-contest-team';
 import { LeagueContentFrame } from '@/components/fantasy/league-content-frame';
+import { LeagueChatDock } from '@/components/fantasy/league-chat-dock';
 import { FantasySignInGate } from '@/components/fantasy/fantasy-sign-in-gate';
 import { getServerUserId } from '@/lib/fantasy/server';
 
@@ -65,6 +66,9 @@ export default async function LeagueLayout({
           {children}
         </EnsureContestTeam>
       </LeagueContentFrame>
+      {/* Only with the league row: without it an official league would read
+          as a small one and every viewer would hold a live channel. */}
+      {league && <LeagueChatDock contest={contest} isOfficial={league.isOfficial} />}
     </AppShell>
   );
 }

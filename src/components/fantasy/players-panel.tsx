@@ -1,7 +1,7 @@
 'use client';
 
 // PlayersPanel — the "Players" tab body. Search (200ms debounce, min 2
-// chars) + filter (All | Available | My team) + rows (name · team · season
+// chars) + rows (name · team · season
 // preview points (UFA only) · ownership label). Drafted weekly-stats
 // contests with a complete draft and a signed-in team get an Add action on
 // available rows → modal to pick who to drop, and a View team link on other
@@ -9,11 +9,11 @@
 // (Hunter, 2026-10-09). Web port of the mobile app's PlayersList.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/PlayersList.tsx).
 //
-// Event contests with player ratings (USAU Nationals) list the ranked players
-// when nothing is typed (All / Available), and open on My team once the draft
-// completes and rosters exist, with the pro team kept from the rating. Every
-// rated row shows rank + Proj (src/lib/fantasy/ratings.ts). While a draft
-// runs, its picks mark players as owned, so Available drops them live.
+// Contests with player ratings (USAU Nationals) list every ranked player when
+// nothing is typed; no All / Available / My team filter (Hunter, 2026-10-14:
+// "just show all the players"), each row says who owns it. Every rated row
+// shows rank + Proj (src/lib/fantasy/ratings.ts). While a draft runs, its
+// picks mark players as owned live.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -47,8 +47,6 @@ import {
 import { getProjections, projectedPoints, projectionKey, type ProjectionMap } from '@/lib/fantasy/projections';
 import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
 import { contestDivision, divisionLabel } from '@/lib/fantasy/competitions';
-
-type Filter = 'all' | 'available' | 'mine';
 
 function waiverClearsLabel(iso: string): string {
   const d = new Date(iso);
@@ -231,8 +229,6 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
   }, [contest.id, isFaab, canAddDrop]);
 
   const [query, setQuery] = useState('');
-  // null until a pill is tapped; `filter` below follows the view until then.
-  const [chosenFilter, setChosenFilter] = useState<Filter | null>(null);
   const [results, setResults] = useState<FantasyPlayerHit[]>([]);
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -274,28 +270,10 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
   }, [myOwnership, draftPicks, draftComplete, myTeam]);
 
   const hasQuery = query.trim().length >= 2;
-  // Scheduling a draft sets settings.draft, but rosters are only seeded when the
-  // draft completes, so a rated pool keeps its ranked list until then. After
-  // that, with nothing typed, the pill opens on My team (or All while searching).
-  const rosterView = isDrafted && (draftComplete || ratings.length === 0);
-  const filter: Filter = chosenFilter ?? (rosterView && !hasQuery ? 'mine' : 'all');
-  // The list follows the pill: My team shows the roster, anything else the ranked
-  // pool (rated contests) or the search prompt.
-  const showMyTeamDefault = !hasQuery && rosterView && filter === 'mine';
-  const showRanked = !hasQuery && !showMyTeamDefault && ratings.length > 0;
+  // Nothing typed: the whole ranked pool (rated contests) or the search prompt.
+  const showRanked = !hasQuery && ratings.length > 0;
 
-  const baseHits: FantasyPlayerHit[] = hasQuery
-    ? results
-    : showMyTeamDefault
-      ? myOwnership.map((t) => ({
-          playerId: t.playerId,
-          fullName: t.playerName,
-          teamId: null,
-          teamName: ratingMap.get(ratingKey(contest.competitionDef.playerLeague, t.playerId))?.teamName ?? null,
-        }))
-      : showRanked
-        ? ratings.map(ratingToHit)
-        : [];
+  const baseHits: FantasyPlayerHit[] = hasQuery ? results : showRanked ? ratings.map(ratingToHit) : [];
 
   const rows: Row[] = baseHits.map((hit) => {
     const ownerId = ownerByPlayer.get(hit.playerId);
@@ -315,16 +293,8 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
     };
   });
 
-  const matchingRows = rows.filter((r) => {
-    if (filter === 'available') return r.isAvailable;
-    if (filter === 'mine') return r.isMine;
-    return true;
-  });
-  // The ranked list pages after filtering, so Available keeps filling as the
-  // top of the list is drafted.
-  const filteredRows = showRanked ? matchingRows.slice(0, rankedShown) : matchingRows;
+  const shownRows = showRanked ? rows.slice(0, rankedShown) : rows;
 
-  const showAvailableFilter = isDrafted;
   const division = contestDivision(contest.settings);
   const poolLabel = `${contest.competitionDef.shortLabel}${division === 'all' ? '' : ` ${divisionLabel(division)}`}`;
 
@@ -353,25 +323,14 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
         )}
       </div>
 
-      {/* ── Segmented filter ──────────────────────────────────────────── */}
-      <div className="flex gap-2">
-        <SegmentButton label="All" active={filter === 'all'} onClick={() => setChosenFilter('all')} />
-        {showAvailableFilter && (
-          <SegmentButton label="Available" active={filter === 'available'} onClick={() => setChosenFilter('available')} />
-        )}
-        <SegmentButton label="My team" active={filter === 'mine'} onClick={() => setChosenFilter('mine')} />
-      </div>
-
       {/* ── Rows ───────────────────────────────────────────────────────── */}
-      {filteredRows.length === 0 ? (
+      {shownRows.length === 0 ? (
         <p className="text-center font-tight text-[13px] text-faint py-8">
           {hasQuery
             ? searching
               ? 'Searching…'
               : `No players found for "${query.trim()}"`
-            : showMyTeamDefault || (showRanked && filter === 'mine')
-              ? 'No players on your team yet.'
-              : `Search the ${poolLabel} player pool`}
+            : `Search the ${poolLabel} player pool`}
         </p>
       ) : (
         <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
@@ -382,7 +341,7 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
               className="px-5 pt-1.5 pb-1"
             />
           )}
-          {filteredRows.map((row, idx) => (
+          {shownRows.map((row, idx) => (
             <PlayerRow
               key={row.playerId}
               row={row}
@@ -403,7 +362,7 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
               }
             />
           ))}
-          {showRanked && rankedShown < matchingRows.length && (
+          {showRanked && rankedShown < rows.length && (
             <div className="border-t border-hairline px-5 py-3">
               <ShowMoreButton onClick={() => setRankedShown((n) => n + RANKED_PAGE_SIZE)} />
             </div>
@@ -445,23 +404,6 @@ export function PlayersPanel({ contest, isOfficial = false }: { contest: Contest
         />
       )}
     </div>
-  );
-}
-
-function SegmentButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={[
-        'px-3.5 py-2 rounded-full font-tight text-[11.5px] font-bold tracking-[0.06em] uppercase transition-colors duration-150 cursor-pointer',
-        active ? 'bg-accent text-accent-ink' : 'bg-ink/5 text-muted hover:bg-ink/10',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-      ].join(' ')}
-    >
-      {label}
-    </button>
   );
 }
 

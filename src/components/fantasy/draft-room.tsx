@@ -1661,7 +1661,6 @@ function SnakeBoard({
       myColumnId={myTeamId}
       focus={focus}
       jumpSignal={jumpSignal}
-      legend={picks.some((p) => ratingMap.has(ratingKey(p.playerLeague, p.playerId)))}
       before={before}
       ariaLabel="Draft board"
     />

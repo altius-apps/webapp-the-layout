@@ -2,10 +2,10 @@
 
 // LeagueHeader — chrome row for every screen inside a fantasy league (contest).
 // Back link → league logo → name + "{shortLabel} · {year}" (a division league
-// reads "{shortLabel} · Men's · {year}") → commissioner
-// invite (InviteMenu: Email invite or Text message) → feed/chat → settings gear
-// (client island: resolves getMyLeagueRole; only the commissioner sees invite,
-// every member sees the gear — Settings holds Leave league).
+// reads "{shortLabel} · Men's · {year}") → settings gear (client island:
+// resolves getMyLeagueRole; every member sees the gear — Settings holds Leave
+// league). Invite moved to the League tab's join-code card and chat to the
+// docked LeagueChatDock, so the name has the row (Hunter, 2026-10-14).
 // Web port of the mobile app's LeagueShell.tsx header row
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueShell.tsx).
 
@@ -22,7 +22,6 @@ import { divisionSuffix } from '@/lib/fantasy/competitions';
 import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { OfficialBadge } from '@/components/fantasy/official-badge';
-import { InviteMenu } from '@/components/fantasy/invite-menu';
 
 interface Props {
   contest: ContestView;
@@ -32,7 +31,6 @@ interface Props {
 export function LeagueHeader({ contest, league }: Props) {
   const { user } = useAuth();
   const [role, setRole] = useState<LeagueRole | null>(null);
-  const isCommissioner = role === 'commissioner';
 
   const title = league?.name ?? contest.name;
   const game = getGame(contest.competition);
@@ -88,28 +86,6 @@ export function LeagueHeader({ contest, league }: Props) {
           {divisionSuffix(contest.settings)} · {contest.seasonYear}
         </p>
       </div>
-
-      {isCommissioner && <InviteMenu leagueId={contest.leagueId} trigger="icon" />}
-
-      <Link
-        href={`/fantasy/l/${contest.id}/feed`}
-        aria-label="League feed and chat"
-        className={[
-          'flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full',
-          'text-ink hover:text-accent hover:bg-ink/5 transition-colors duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        ].join(' ')}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M4 5h16a1 1 0 011 1v9a1 1 0 01-1 1H9l-4.5 4V16H4a1 1 0 01-1-1V6a1 1 0 011-1z"
-            stroke="currentColor"
-            strokeWidth={1.7}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        </svg>
-      </Link>
 
       {role && (
         <Link

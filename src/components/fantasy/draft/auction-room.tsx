@@ -900,7 +900,6 @@ export function AuctionBoard({
       rows={draft.rounds}
       cellAt={cellAt}
       myColumnId={myTeamId}
-      legend={picks.some((p) => ratingMap.has(ratingKey(p.playerLeague, p.playerId)))}
       ariaLabel="Auction board"
     />
   );

@@ -11,7 +11,7 @@
 // last row and measures the sheet when deciding whether the pick on the clock is
 // in view. Up to FIT_COLUMNS teams share the screen width and nothing moves
 // sideways; a wider board scrolls both ways with only the board sliding, while
-// the lobby panel and legend stay pinned (Hunter, 2026-10-13: four 96px columns
+// the lobby panel stays pinned (Hunter, 2026-10-13: four 96px columns
 // overflowed a phone by ~33px and dragged the lobby card with them).
 //
 // Pick tiles are colored by the player's rank band, the stand-in for Sleeper's
@@ -63,13 +63,6 @@ const TONE_CLASS: Record<BoardTone, string> = {
   r4: 'bg-[#B7C2EE]',
   none: 'bg-[#D5DDEA]',
 };
-
-const LEGEND: { tone: BoardTone; label: string }[] = [
-  { tone: 'r1', label: 'Top 10' },
-  { tone: 'r2', label: '11–30' },
-  { tone: 'r3', label: '31–60' },
-  { tone: 'r4', label: '61+' },
-];
 
 /** Rank band → tile color. null/undefined = unrated. */
 export function toneForRank(rank: number | null | undefined): BoardTone {
@@ -175,7 +168,6 @@ export function DraftBoard({
   myColumnId,
   focus = null,
   jumpSignal = 0,
-  legend = false,
   before,
   ariaLabel,
 }: {
@@ -190,8 +182,6 @@ export function DraftBoard({
   focus?: { row: number; col: number } | null;
   /** Bump to scroll `focus` into view even if it is already on screen. */
   jumpSignal?: number;
-  /** Show the rank-color key (only when some pick has a rating). */
-  legend?: boolean;
   /** Above the team header (the lobby panel): scrolls up with the board, never sideways. */
   before?: React.ReactNode;
   ariaLabel: string;
@@ -249,20 +239,9 @@ export function DraftBoard({
       ].join(' ')}
     >
       <div className={fit ? undefined : 'w-max min-w-full'}>
-        {(before || (legend && n > 0)) && (
+        {before && (
           <div className={['px-3 lg:px-5', fit ? '' : 'sticky left-0 w-[100cqw]'].join(' ')}>
             {before}
-            {legend && n > 0 && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-2 pt-1 font-tight text-[10.5px] text-muted">
-                <span className="font-bold tracking-[0.12em] uppercase text-faint">Rank</span>
-                {LEGEND.map((l) => (
-                  <span key={l.tone} className="inline-flex items-center gap-1.5">
-                    <span aria-hidden="true" className={['w-2.5 h-2.5 rounded-full', TONE_CLASS[l.tone]].join(' ')} />
-                    {l.label}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
         )}
 

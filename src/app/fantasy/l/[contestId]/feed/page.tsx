@@ -1,6 +1,7 @@
-// /fantasy/l/[contestId]/feed — league activity + chat (reached via the chat-bubble icon in the league header, not a nav tab —
-// mirrors mobile's LeagueShell chrome, see league-header.tsx). Chrome comes
-// entirely from the parent layout; this page renders only the feed body.
+// /fantasy/l/[contestId]/feed — league activity + chat as a page. Nothing links
+// here since chat moved to the docked LeagueChatDock (Hunter, 2026-10-14), which
+// hides on this route; kept for old links. Chrome comes entirely from the
+// parent layout; this page renders only the feed body.
 
 import { notFound } from 'next/navigation';
 import { getContest } from '@/lib/fantasy/leagues';

@@ -2,8 +2,8 @@
 
 // LeagueView — the "League" tab body (root tab for points/event contests;
 // 4th tab for h2h weekly contests). Top → bottom: draft card (until the
-// draft is done), standings (h2h or points), playoffs mini-section,
-// schedule strip (weekly only), invite code (until the draft is done) + join
+// draft is done), standings (h2h or points), invite code (until the draft is
+// done), trades, playoffs mini-section, schedule strip (weekly only), join
 // CTA, then the draft card once the draft is done. Web port of the
 // mobile app's LeagueView.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueView.tsx).
@@ -196,6 +196,10 @@ export function LeagueView({ contest, league }: { contest: ContestView; league: 
         )}
       </section>
 
+      {/* ── Invite: under the standings, where the league's members are
+          (moved out of the header, Hunter 2026-10-14). Commissioner-only. ── */}
+      {!draftDone && !isOfficial && <InviteCodeRow leagueId={contest.leagueId} />}
+
       {/* ── Trades ─────────────────────────────── */}
       <TradesCard contest={contest} />
 
@@ -232,8 +236,7 @@ export function LeagueView({ contest, league }: { contest: ContestView; league: 
         </section>
       )}
 
-      {/* ── Invite + join CTA ───────────────────── */}
-      {!draftDone && !isOfficial && <InviteCodeRow leagueId={contest.leagueId} />}
+      {/* ── Join CTA ───────────────────── */}
       <LeagueMembersPanel
         leagueId={contest.leagueId}
         isPublic={league?.isPublic}

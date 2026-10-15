@@ -1,6 +1,8 @@
 'use client';
 
-// LeagueFeed — the feed route's body (app/fantasy/l/[contestId]/feed).
+// LeagueFeed — the feed route's body (app/fantasy/l/[contestId]/feed) and the
+// draft room's Chat tab. Its data lives in useLeagueFeed, which the docked
+// chat (league-chat-dock.tsx) shares along with the composer and rows.
 // Merged system activity + member chat, newest-first top-to-bottom (a normal
 // scrolling div, not an inverted list — the web has no bottom-pinned keyboard
 // to design around). Composer pinned above the timeline for signed-in
@@ -31,9 +33,10 @@ import {
 import { getLeagueMembers, getMyLeagueRole, type ContestView, type LeagueMember } from '@/lib/fantasy/leagues';
 
 const ACTIVITY_LIMIT = 50;
+const MESSAGE_LIMIT = 100;
 const MAX_LEN = 500;
 
-function relativeTime(iso: string): string {
+export function relativeTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const diffMs = Date.now() - d.getTime();
@@ -53,19 +56,18 @@ function activityHref(item: ActivityItem, contestId: string): string | null {
   return null;
 }
 
-interface Props {
-  contest: ContestView;
-  outlined?: boolean;
-  isOfficial?: boolean;
+export interface FeedOptions {
+  /** false = only the newest entry (the chat dock's collapsed bar). */
+  full?: boolean;
+  /** Realtime updates. */
+  live?: boolean;
 }
 
-export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Props) {
-  // In the draft room's white sheet, cards are outlined instead of shadowed.
-  const card = outlined ? 'bg-surface rounded-card-lg border border-hairline' : 'bg-surface rounded-card-lg shadow-card';
+/** League activity + chat: data, realtime, composer and delete state. Shared by
+ *  LeagueFeed (the feed page and the draft room's Chat tab) and LeagueChatDock. */
+export function useLeagueFeed(leagueId: string, isOfficial: boolean, { full = true, live = true }: FeedOptions = {}) {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
-
-  const leagueId = contest.leagueId;
 
   const [role, setRole] = useState<string | null>(null);
   const isMember = role != null;
@@ -76,15 +78,18 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
   const [members, setMembers] = useState<LeagueMember[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const activityLimit = full ? ACTIVITY_LIMIT : 1;
+  const messageLimit = full ? MESSAGE_LIMIT : 1;
+
   const refetch = useCallback(() => {
     Promise.all([
-      getLeagueActivity(leagueId, ACTIVITY_LIMIT).catch(() => []),
-      user ? getLeagueMessages(leagueId).catch(() => []) : Promise.resolve([]),
+      getLeagueActivity(leagueId, activityLimit).catch(() => []),
+      user ? getLeagueMessages(leagueId, messageLimit).catch(() => []) : Promise.resolve([]),
     ]).then(([a, m]) => {
       setActivity(a);
       setMessages(m);
     });
-  }, [leagueId, user]);
+  }, [leagueId, user, activityLimit, messageLimit]);
 
   useEffect(() => {
     if (!user) {
@@ -104,8 +109,8 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
     let cancelled = false;
     setLoading(true);
     Promise.all([
-      getLeagueActivity(leagueId, ACTIVITY_LIMIT).catch(() => []),
-      user ? getLeagueMessages(leagueId).catch(() => []) : Promise.resolve([]),
+      getLeagueActivity(leagueId, activityLimit).catch(() => []),
+      user ? getLeagueMessages(leagueId, messageLimit).catch(() => []) : Promise.resolve([]),
       // An official league can have thousands of members — never list them all.
       isOfficial ? Promise.resolve([]) : getLeagueMembers(leagueId).catch(() => []),
     ]).then(([a, m, mem]) => {
@@ -118,10 +123,10 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
     return () => {
       cancelled = true;
     };
-  }, [leagueId, user, isOfficial]);
+  }, [leagueId, user, isOfficial, activityLimit, messageLimit]);
 
   useEffect(() => {
-    if (!leagueId) return;
+    if (!leagueId || !live) return;
     // An official league can have thousands of viewers: fold a burst of
     // realtime events into one refetch per 5 s per viewer.
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -138,7 +143,7 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
       if (timer) clearTimeout(timer);
       unsubscribeLeagueFeed(channel);
     };
-  }, [leagueId, refetch, isOfficial]);
+  }, [leagueId, refetch, isOfficial, live]);
 
   // Official leagues: names for the people in the chat only, never the whole
   // league. Each id is asked for once (a member who left is never found).
@@ -207,62 +212,54 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
     }
   }, [pendingDeleteId, refetch]);
 
+  return {
+    user,
+    isOfficial,
+    isMember,
+    isCommissioner,
+    loading,
+    entries,
+    nameByUserId,
+    authOpen,
+    setAuthOpen,
+    draft,
+    setDraft,
+    sendError,
+    setSendError,
+    canSend,
+    handleSend,
+    pendingDeleteId,
+    setPendingDeleteId,
+    deleting,
+    handleDeleteMessage,
+  };
+}
+
+export type LeagueFeedState = ReturnType<typeof useLeagueFeed>;
+export type FeedEntry = LeagueFeedState['entries'][number];
+
+interface Props {
+  contest: ContestView;
+  outlined?: boolean;
+  isOfficial?: boolean;
+}
+
+export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Props) {
+  // In the draft room's white sheet, cards are outlined instead of shadowed.
+  const card = outlined ? 'bg-surface rounded-card-lg border border-hairline' : 'bg-surface rounded-card-lg shadow-card';
+  const feed = useLeagueFeed(contest.leagueId, isOfficial);
+  const { loading, entries } = feed;
+
   return (
     <>
     <div className="space-y-4">
-      {isMember ? (
+      {feed.isMember ? (
         <div className={`${card} p-4`}>
-          {sendError && (
-            <p className="text-[12px] text-accent font-tight mb-2" role="alert">
-              {sendError}
-            </p>
-          )}
-          <div className="flex items-end gap-2.5">
-            <textarea
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                setSendError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Message the league"
-              maxLength={MAX_LEN}
-              rows={1}
-              aria-label="Message the league"
-              className="flex-1 min-h-[44px] max-h-[120px] px-4 py-3 rounded-card bg-bg text-[14px] text-ink font-tight placeholder:text-faint resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!canSend}
-              aria-label="Send message"
-              className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center bg-accent text-accent-ink disabled:opacity-30 hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M4 12l16-8-6 16-2.5-6L4 12z" stroke="currentColor" strokeWidth={1.7} strokeLinejoin="round" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
+          <FeedComposer feed={feed} inputClassName="bg-bg" />
         </div>
       ) : (
-        <div className={`${card} p-4 flex items-center justify-between gap-4`}>
-          <p className="text-muted font-tight text-[13px]">
-            {user ? 'Join the league to chat.' : 'Sign in and join the league to chat.'}
-          </p>
-          {!user && (
-            <button
-              type="button"
-              onClick={() => setAuthOpen(true)}
-              className="flex-shrink-0 px-4 py-2 rounded-full bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              Sign in
-            </button>
-          )}
+        <div className={`${card} p-4`}>
+          <JoinToChat feed={feed} />
         </div>
       )}
 
@@ -278,17 +275,7 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
         <ol className="flex flex-col gap-1.5">
           {entries.map((entry) => (
             <li key={`${entry.type}:${entry.item.id}`}>
-              {entry.type === 'activity' ? (
-                <ActivityRow item={entry.item} contestId={contest.id} />
-              ) : (
-                <MessageRow
-                  message={entry.item}
-                  authorName={nameByUserId.get(entry.item.userId) ?? 'Member'}
-                  mine={entry.item.userId === user?.id}
-                  canDelete={isCommissioner || entry.item.userId === user?.id || (isOfficial && user?.isAdmin === true)}
-                  onDelete={() => setPendingDeleteId(entry.item.id)}
-                />
-              )}
+              <FeedEntryRow entry={entry} feed={feed} contestId={contest.id} />
             </li>
           ))}
         </ol>
@@ -297,24 +284,116 @@ export function LeagueFeed({ contest, outlined = false, isOfficial = false }: Pr
 
     {/* Outside the space-y stack: its sibling margin landed on these fixed
         overlays and started the scrim 16px low. */}
-    <AuthModal
-      open={authOpen}
-      dismissible
-      headline="Sign in to chat"
-      subhead="Join the conversation with your league."
-      onDismiss={() => setAuthOpen(false)}
-    />
+    <FeedDialogs feed={feed} />
+    </>
+  );
+}
 
-    <ConfirmDialog
-      open={pendingDeleteId != null}
-      title="Delete message?"
-      body="This removes it for everyone in the league."
-      confirmLabel="Delete"
-      busyLabel="Deleting…"
-      busy={deleting}
-      onConfirm={handleDeleteMessage}
-      onCancel={() => setPendingDeleteId(null)}
+/** The message box + send button (members only). */
+export function FeedComposer({ feed, inputClassName }: { feed: LeagueFeedState; inputClassName: string }) {
+  const { draft, setDraft, sendError, setSendError, canSend, handleSend } = feed;
+  return (
+    <>
+      {sendError && (
+        <p className="text-[12px] text-accent font-tight mb-2" role="alert">
+          {sendError}
+        </p>
+      )}
+      <div className="flex items-end gap-2.5">
+        <textarea
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSendError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Message the league"
+          maxLength={MAX_LEN}
+          rows={1}
+          aria-label="Message the league"
+          className={[
+            // 16px on phones: iOS Safari zooms into any field under 16px.
+            'flex-1 min-h-[44px] max-h-[120px] px-4 py-3 rounded-card text-[16px] lg:text-[14px] text-ink font-tight placeholder:text-faint resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            inputClassName,
+          ].join(' ')}
+        />
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={!canSend}
+          aria-label="Send message"
+          className="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center bg-accent text-accent-ink disabled:opacity-30 hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 12l16-8-6 16-2.5-6L4 12z" stroke="currentColor" strokeWidth={1.7} strokeLinejoin="round" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
+/** Non-members (and signed-out viewers) in place of the composer. */
+export function JoinToChat({ feed }: { feed: LeagueFeedState }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <p className="text-muted font-tight text-[13px]">
+        {feed.user ? 'Join the league to chat.' : 'Sign in and join the league to chat.'}
+      </p>
+      {!feed.user && (
+        <button
+          type="button"
+          onClick={() => feed.setAuthOpen(true)}
+          className="flex-shrink-0 px-4 py-2 rounded-full bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Sign in
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function FeedEntryRow({ entry, feed, contestId }: { entry: FeedEntry; feed: LeagueFeedState; contestId: string }) {
+  if (entry.type === 'activity') return <ActivityRow item={entry.item} contestId={contestId} />;
+  const { user, isCommissioner, isOfficial } = feed;
+  return (
+    <MessageRow
+      message={entry.item}
+      authorName={feed.nameByUserId.get(entry.item.userId) ?? 'Member'}
+      mine={entry.item.userId === user?.id}
+      canDelete={isCommissioner || entry.item.userId === user?.id || (isOfficial && user?.isAdmin === true)}
+      onDelete={() => feed.setPendingDeleteId(entry.item.id)}
     />
+  );
+}
+
+/** Sign-in and delete-confirm overlays. */
+export function FeedDialogs({ feed }: { feed: LeagueFeedState }) {
+  return (
+    <>
+      <AuthModal
+        open={feed.authOpen}
+        dismissible
+        headline="Sign in to chat"
+        subhead="Join the conversation with your league."
+        onDismiss={() => feed.setAuthOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={feed.pendingDeleteId != null}
+        title="Delete message?"
+        body="This removes it for everyone in the league."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={feed.deleting}
+        onConfirm={feed.handleDeleteMessage}
+        onCancel={() => feed.setPendingDeleteId(null)}
+      />
     </>
   );
 }
