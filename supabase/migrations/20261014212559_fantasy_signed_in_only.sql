@@ -2,13 +2,13 @@
 -- mobile session). Signed-out users see a sign-in prompt on both apps; this
 -- stops the DB serving league/member data to the anon key.
 --
--- ⚠️ APPLY ONLY AFTER the web build that reads league data with the user's
--- session (src/lib/fantasy/reader.ts) is deployed. The currently deployed web
--- reads with the anon client and would break for everyone. Mobile's shipped
--- builds are fine (session reads), except fantasy_roster_slots, which stays
--- anon here until Hunter's next mobile build is out — follow-up migration.
+-- Applied 2026-10-14 after the web build that reads league data with the user's
+-- session (src/lib/fantasy/reader.ts) is deployed. The previous web build read
+-- with the anon client and would break for everyone. fantasy_roster_slots is
+-- locked too (Hunter: "no one is really using" the shipped mobile build, and a
+-- new build is going out the same day); the old build's Team tab opens empty
+-- for signed-in users until they update.
 --
--- Move to supabase/migrations/<version>_fantasy_signed_in_only.sql once applied.
 
 -- 1. League data: the "<table> public read" policies move from anon +
 --    authenticated to authenticated only (USING true is unchanged).
@@ -33,8 +33,9 @@ begin
 end
 $p$;
 
--- STAYS anon: fantasy_roster_slots ("fantasy_slots public read", until the next
--- mobile build), fantasy_player_ratings (player data, not league data).
+alter policy "fantasy_slots public read" on public.fantasy_roster_slots to authenticated;
+
+-- STAYS anon: fantasy_player_ratings (player data, not league data).
 
 -- 2. League-data RPCs: signed-in only.
 revoke execute on function public.fantasy_public_leagues(integer) from public, anon;

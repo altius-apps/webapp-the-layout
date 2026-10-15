@@ -20,11 +20,11 @@ function RefreshOnSignIn() {
   );
 }
 
-export function FantasySignInGate() {
+export function FantasySignInGate({ headline = 'Sign in to see this league.' }: { headline?: string }) {
   return (
     <AuthGate
       eyebrow="Fantasy"
-      headline="Sign in to see this league."
+      headline={headline}
       subhead="Standings, teams and chat are for signed-in players. Sign in or create a free account to join in."
     >
       <RefreshOnSignIn />

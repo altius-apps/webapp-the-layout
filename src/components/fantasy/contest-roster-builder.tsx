@@ -53,6 +53,39 @@ function buildSlots(contest: ContestView): SlotState[] {
   return Array.from({ length: s.flex }, () => ({ role: 'flex' as const, player: null, preview: null }));
 }
 
+// Unsaved picks survive leaving the Team tab (Hunter, 2026-10-14: flip to
+// Players to research, come back to the same picks). sessionStorage per
+// contest/team/period, cleared on save; same session-only idiom as
+// use-remembered-event-view.
+const PICKS_KEY = 'the-layout.fantasy-roster-picks';
+
+function picksKey(contestId: string, teamId: string, period: string): string {
+  return `${PICKS_KEY}:${contestId}:${teamId}:${period}`;
+}
+
+function readPicks(key: string, contest: ContestView): SlotState[] | null {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null') as SlotState[] | null;
+    const base = buildSlots(contest);
+    // Only if it still fits the contest's shape (slot count and roles).
+    if (!Array.isArray(saved) || saved.length !== base.length || saved.some((x, i) => x.role !== base[i].role)) {
+      return null;
+    }
+    return saved;
+  } catch {
+    return null; // storage unavailable (private mode) or corrupt
+  }
+}
+
+function writePicks(key: string, slots: SlotState[] | null): void {
+  try {
+    if (slots) sessionStorage.setItem(key, JSON.stringify(slots));
+    else sessionStorage.removeItem(key);
+  } catch {
+    // storage unavailable — picks just don't carry over
+  }
+}
+
 interface ContestRosterBuilderProps {
   contest: ContestView;
   /** When present, the slot typeahead filters this pool locally (substring
@@ -81,6 +114,9 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
 
   const [slots, setSlots] = useState<SlotState[]>(() => buildSlots(contest));
   const [rosterLoading, setRosterLoading] = useState(false);
+  // Set by the user's own picks/clears, so loads never get written back as picks.
+  const edited = useRef(false);
+  const draftKey = myTeam && selectedPeriod ? picksKey(contest.id, myTeam.id, selectedPeriod) : null;
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -164,9 +200,21 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
 
   // ── Load roster for the selected period once we have a team ────────────
   useEffect(() => {
+    edited.current = false;
     if (!myTeam || !selectedPeriod) {
       setSlots(buildSlots(contest));
       return;
+    }
+    const key = picksKey(contest.id, myTeam.id, selectedPeriod);
+    const lockAt = periodsToWeeks(periods).find((w) => w.week === selectedPeriod)?.lockAt;
+    if (lockAt && new Date(lockAt).getTime() <= Date.now()) {
+      writePicks(key, null); // locked: only the saved roster counts now
+    } else {
+      const unsaved = readPicks(key, contest);
+      if (unsaved) {
+        setSlots(unsaved);
+        return;
+      }
     }
     let cancelled = false;
     setRosterLoading(true);
@@ -191,6 +239,10 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTeam, selectedPeriod, contest.id]);
 
+  useEffect(() => {
+    if (edited.current && draftKey) writePicks(draftKey, slots);
+  }, [slots, draftKey]);
+
   const weeks = periodsToWeeks(periods);
   const activeWeekInfo = weeks.find((w) => w.week === selectedPeriod) ?? null;
   const isLocked = activeWeekInfo?.locked ?? false;
@@ -201,6 +253,7 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
 
   const handleSelectPlayer = useCallback(
     async (slotIndex: number, player: FantasyPlayerHit) => {
+      edited.current = true;
       setSlots((prev) => {
         const next = [...prev];
         next[slotIndex] = { ...next[slotIndex], player, preview: null };
@@ -226,6 +279,7 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
   );
 
   const handleClearPlayer = useCallback((slotIndex: number) => {
+    edited.current = true;
     setSlots((prev) => {
       const next = [...prev];
       next[slotIndex] = { ...next[slotIndex], player: null, preview: null };
@@ -249,6 +303,8 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
         .filter((s) => s.player !== null)
         .map((s) => ({ playerId: s.player!.playerId, role: s.role }));
       await saveContestRoster(contest, myTeam.id, selectedPeriod, rosterSlots);
+      edited.current = false;
+      writePicks(picksKey(contest.id, myTeam.id, selectedPeriod), null);
       await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
       setSaveOk(true);
       setTimeout(() => setSaveOk(false), 2500);
@@ -734,7 +790,8 @@ function PlayerTypeahead({
           aria-expanded={open}
           className={[
             'w-full pl-10 pr-4 py-2.5 rounded-card-sm bg-ink/5',
-            'font-tight text-[14px] text-ink placeholder:text-faint',
+            // 16px on phones: iOS Safari zooms into any field under 16px.
+            'font-tight text-[16px] lg:text-[14px] text-ink placeholder:text-faint',
             'transition-colors duration-150',
             'focus:outline-none focus:ring-2 focus:ring-accent',
             'min-h-[44px]',

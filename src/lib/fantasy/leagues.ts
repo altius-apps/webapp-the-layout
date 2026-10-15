@@ -480,8 +480,8 @@ export interface PublicLeagueRow {
   open: boolean;
 }
 
-/** Public leagues with a contest still in play (signed-in only; the hub loads
- *  it client-side so the page stays ISR). */
+/** Public leagues with a contest still in play, minus the ones the viewer is
+ *  in (signed-in only; the hub loads it client-side so the page stays ISR). */
 export async function getPublicLeagues(limit = 50): Promise<PublicLeagueRow[]> {
   const { data, error } = await leagueReader().rpc('fantasy_public_leagues', { p_limit: limit });
   if (error) throw new Error(error.message);

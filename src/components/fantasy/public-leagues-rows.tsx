@@ -1,7 +1,7 @@
 'use client';
 
-// Rows + competition filter for the hub's Public section. Rows come from the
-// server (cached); this island only filters them and hosts the JOIN pill.
+// Rows + competition filter for public leagues (the hub's Public section and
+// /fantasy/public). Filters the rows it's given and hosts the JOIN pill.
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -27,7 +27,16 @@ export interface PublicLeagueView {
 
 const ALL = 'all';
 
-export function PublicLeaguesRows({ rows }: { rows: PublicLeagueView[] }) {
+export function PublicLeaguesRows({
+  rows,
+  filterable = true,
+  footer,
+}: {
+  rows: PublicLeagueView[];
+  filterable?: boolean;
+  /** Last row of the card (the hub's browse link). */
+  footer?: React.ReactNode;
+}) {
   const [competition, setCompetition] = useState<string>(ALL);
 
   const options = useMemo<PillSelectOption<string>[]>(() => {
@@ -40,7 +49,7 @@ export function PublicLeaguesRows({ rows }: { rows: PublicLeagueView[] }) {
 
   return (
     <>
-      {options.length > 2 && (
+      {filterable && options.length > 2 && (
         <div className="mb-3">
           <PillSelect value={competition} options={options} onChange={setCompetition} ariaLabel="Filter public leagues by game" />
         </div>
@@ -85,6 +94,7 @@ export function PublicLeaguesRows({ rows }: { rows: PublicLeagueView[] }) {
             </li>
           ))}
         </ul>
+        {footer && <div className={shown.length > 0 ? 'border-t border-hairline' : ''}>{footer}</div>}
       </div>
     </>
   );
