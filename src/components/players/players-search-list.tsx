@@ -26,7 +26,7 @@ type Mode =
        *  search server action so it queries the same season. */
       year: number;
     }
-  | { kind: 'usau'; players: UsauPlayerListRow[]; division: UsauDivision; level: UsauLevel };
+  | { kind: 'usau'; players: UsauPlayerListRow[]; division: UsauDivision; level: UsauLevel; loadFailed?: boolean };
 
 interface Props {
   mode: Mode;
@@ -183,7 +183,7 @@ export function PlayersSearchList({ mode, scopeLabel, currentSort = 'impact', cu
 
       {/* List */}
       {searching && count === 0 ? null : count === 0 ? (
-        <EmptyState query={needle} />
+        <EmptyState query={needle} unavailable={mode.kind === 'usau' && mode.loadFailed === true && !needle} />
       ) : filtered.kind === 'ufa' ? (
         <UfaList stats={filtered.stats} championTeamIds={filtered.championTeamIds} currentSort={currentSort} currentDir={currentDir} />
       ) : (
@@ -404,14 +404,18 @@ function TrophyChip({ title }: { title: string }) {
   );
 }
 
-function EmptyState({ query }: { query: string }) {
+function EmptyState({ query, unavailable = false }: { query: string; unavailable?: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-12 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[13px] font-semibold uppercase tracking-[0.18em] text-muted mb-1 font-tight">
-        No matches
+        {unavailable ? 'List unavailable' : 'No matches'}
       </div>
       <div className="text-[12px] text-faint font-tight">
-        {query ? `Nothing for "${query}".` : 'Try a different search.'}
+        {unavailable
+          ? "The player list didn't load. Search still works, or refresh in a minute."
+          : query
+            ? `Nothing for "${query}".`
+            : 'Try a different search.'}
       </div>
     </div>
   );

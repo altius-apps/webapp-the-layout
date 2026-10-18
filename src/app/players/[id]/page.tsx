@@ -36,8 +36,10 @@ interface Props {
   params: { id: string };
 }
 
+// No .catch on the profile reads: a DB failure must surface as an uncached 500,
+// never as a notFound() that ISR caches as a 404 for a real player.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
+  const profile = await getUnifiedPlayerProfile(params.id);
   if (!profile) return { title: 'Player not found · The Layout' };
   return {
     title: `${profile.displayName} · The Layout`,
@@ -48,7 +50,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function PlayerProfilePage({ params }: Props) {
-  const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
+  const profile = await getUnifiedPlayerProfile(params.id);
   if (!profile) notFound();
 
   // Fetch content across ALL of the person's league ids (contentRefs), not just

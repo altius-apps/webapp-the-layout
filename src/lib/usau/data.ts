@@ -1555,7 +1555,7 @@ export async function getUsauClubChampionsBySeason(): Promise<
   Map<number, Map<string, UsauChampion>>
 > {
   const db = await supabase();
-  const { data: nationals } = await db
+  const { data: nationals, error: nationalsError } = await db
     .from('usau_events')
     .select('id, season, usau_slug')
     .eq('competition_level', 'CLUB')
@@ -1565,6 +1565,7 @@ export async function getUsauClubChampionsBySeason(): Promise<
         'usau_slug.ilike.%usa-ultimate-club-championships%',
     )
     .not('usau_slug', 'ilike', '%us-open%');
+  if (nationalsError) throw nationalsError;
   const nationalsBySeason = new Map<string, { id: string; season: number }>();
   for (const e of nationals ?? []) {
     nationalsBySeason.set(e.id, { id: e.id, season: e.season });
@@ -1574,7 +1575,7 @@ export async function getUsauClubChampionsBySeason(): Promise<
   // Pull every round='final' game at any Nationals event. With Men +
   // Women + Mixed all under one event_id, we expect up to 3 finals per
   // event — one per division.
-  const { data: finals } = await db
+  const { data: finals, error: finalsError } = await db
     .from('usau_games')
     .select(
       'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
@@ -1582,7 +1583,10 @@ export async function getUsauClubChampionsBySeason(): Promise<
         'team_b:usau_teams!team_b_id(name, gender_division)',
     )
     .in('event_id', Array.from(nationalsBySeason.keys()))
-    .eq('round', 'final');
+    .eq('round', 'final')
+    .order('scheduled_at', { ascending: false, nullsFirst: false })
+    .order('id');
+  if (finalsError) throw finalsError;
 
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
@@ -1597,10 +1601,17 @@ export async function getUsauClubChampionsBySeason(): Promise<
     team_b: TeamRef;
   };
 
-  // season → division → champion
+  // season → division → champion. Placement games are sometimes tagged
+  // round='final' too ("11th Place", "13th Place" at 2016 + 2024 Nationals), so
+  // only gold-medal-bracket finals count and the latest-scheduled one wins. Same
+  // rule as mobile; rows come latest-first, ties by id, matching the SQL mirror
+  // _usau_club_champions_json().
   const result = new Map<number, Map<string, UsauChampion>>();
+  const finalAt = new Map<string, number>();
   for (const g of (finals ?? []) as unknown as Row[]) {
+    if (!isChampionshipBracketName(g.bracket_name)) continue;
     if (g.score_a == null || g.score_b == null) continue;
+    if (g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
     const ev = nationalsBySeason.get(g.event_id);
     if (!ev) continue;
@@ -1620,19 +1631,13 @@ export async function getUsauClubChampionsBySeason(): Promise<
     }
     if (!division) continue;
 
+    const at = g.scheduled_at ? new Date(g.scheduled_at).getTime() : 0;
+    const key = `${ev.season}|${division}`;
+    if ((finalAt.get(key) ?? -Infinity) >= at) continue;
+    finalAt.set(key, at);
+
     if (!result.has(ev.season)) result.set(ev.season, new Map());
     const seasonMap = result.get(ev.season)!;
-    // Multiple final rows for the same (season, division) shouldn't
-    // happen, but if they do prefer the latest-scheduled one.
-    const existing = seasonMap.get(division);
-    if (existing) {
-      // Compare schedules to keep the latest.
-      const ts = g.scheduled_at ? new Date(g.scheduled_at).getTime() : 0;
-      // We don't store scheduled_at on UsauChampion; keep first-write
-      // for simplicity unless we explicitly add it. First-write wins.
-      void ts;
-      continue;
-    }
     seasonMap.set(division, {
       teamId: winnerId,
       teamName: winnerName,

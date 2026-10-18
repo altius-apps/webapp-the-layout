@@ -114,6 +114,14 @@ export interface BrowseFilters {
   limit?: number;
 }
 
+// Search text goes into a raw PostgREST .or() string, where , . : ( ) are
+// filter grammar, so typed text could add filter clauses. A double-quoted
+// value (with " and \ escaped) is always read as a value.
+function ilikeAny(columns: string[], text: string): string {
+  const value = `"%${text.replace(/["\\]/g, '\\$&')}%"`;
+  return columns.map((c) => `${c}.ilike.${value}`).join(',');
+}
+
 export async function listJerseyListings(filters: BrowseFilters = {}): Promise<JerseyListing[]> {
   const supabase = createClient() as any;
   const bucket = supabase.storage.from(STORAGE_BUCKET);
@@ -131,10 +139,7 @@ export async function listJerseyListings(filters: BrowseFilters = {}): Promise<J
   if (filters.state) query = query.eq('state', filters.state);
   if (filters.country) query = query.eq('country', filters.country);
   if (filters.q && filters.q.trim().length > 1) {
-    const q = `%${filters.q.trim()}%`;
-    query = query.or(
-      `title.ilike.${q},team_name.ilike.${q},player_name.ilike.${q},league_name.ilike.${q}`,
-    );
+    query = query.or(ilikeAny(['title', 'team_name', 'player_name', 'league_name'], filters.q.trim()));
   }
 
   const { data, error } = await query;
@@ -216,10 +221,7 @@ export async function listJerseyWants(filters: BrowseFilters = {}): Promise<Jers
   if (filters.state) query = query.eq('state', filters.state);
   if (filters.country) query = query.eq('country', filters.country);
   if (filters.q && filters.q.trim().length > 1) {
-    const q = `%${filters.q.trim()}%`;
-    query = query.or(
-      `team_name.ilike.${q},player_name.ilike.${q},league_name.ilike.${q},note.ilike.${q}`,
-    );
+    query = query.or(ilikeAny(['team_name', 'player_name', 'league_name', 'note'], filters.q.trim()));
   }
 
   const { data, error } = await query;

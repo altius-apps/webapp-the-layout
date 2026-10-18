@@ -1469,6 +1469,7 @@ function ConnectionsSection({
         </h2>
         <Link
           href={threadHref}
+          prefetch={false}
           className="text-[10px] font-bold tracking-[0.1em] uppercase text-muted hover:text-accent transition-colors font-sans no-underline inline-flex items-center gap-1"
         >
           See the full Thread

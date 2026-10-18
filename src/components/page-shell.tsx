@@ -68,9 +68,12 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
   const showFooter = !isDraftRoomPath(usePathname() ?? '');
 
   return (
-    // h-screen + flex-col: AppRail (flex-shrink-0, now the only chrome bar)
-    // then the content area gets the remaining height via flex-1.
-    <div className="h-screen bg-bg text-ink flex flex-col">
+    // h-[100dvh] + flex-col: AppRail (flex-shrink-0, now the only chrome bar)
+    // then the content area gets the remaining height via flex-1. dvh, not
+    // h-screen: on iOS Safari 100vh is the toolbar-collapsed height, so with
+    // the toolbar showing this shell (and the pane's bottom padding) ran
+    // below the visible area and the last rows hid behind the bottom nav.
+    <div className="h-[100dvh] bg-bg text-ink flex flex-col">
       {/* Global top app rail — present on every breakpoint. AppRail always
           renders the Scores/Schedule/Teams/Players page-switcher pills
           (centered, self-gating) on lg+; gamesSlot threads this page's

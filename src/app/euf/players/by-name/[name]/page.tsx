@@ -29,13 +29,22 @@ interface Props {
   params: { name: string };
 }
 
+// A malformed %-sequence used to throw a 500 here (the WFDF page already guards it).
+function decodeName(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const name = decodeURIComponent(params.name);
+  const name = decodeName(params.name);
   return { title: `${name} · EUCS · The Layout` };
 }
 
 export default async function EufPlayerPage({ params }: Props) {
-  const name = decodeURIComponent(params.name);
+  const name = decodeName(params.name);
 
   // 1. Anchor-league identity (USAU → UFA) wins: the unified profile carries
   //    the person's FULL career (EUCS and WFDF stints included), so hand off.

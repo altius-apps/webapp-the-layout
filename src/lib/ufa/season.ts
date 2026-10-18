@@ -1,8 +1,11 @@
 // Pure season helpers — no server-only dependency, safe to import in client components.
 
-/** Current UFA season year. Season runs ~April through August. */
+import { defaultSeason } from '@/lib/season-windows';
+
+/** Current UFA season year. Season runs ~April through August; the default
+ *  flips to the new year on February 1 (season-windows.ts). */
 export function currentSeasonYear(now: Date = new Date()): number {
-  return now.getFullYear();
+  return defaultSeason('ufa', now);
 }
 
 /** Default years dropdown — most recent down through 2022 (UFA rebrand window). */

@@ -56,12 +56,15 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // Body min-height is dvh, not min-h-screen: AppShell is 100dvh, and a
+  // 100vh body would keep the document taller than the visible viewport on iOS
+  // Safari, a second scroll layer that chains from the pane's end.
   return (
     <html lang="en" data-theme="field" className={`${interTight.variable} ${inter.variable} ${antonio.variable}`}>
       <head>
         <ThemeBootstrap />
       </head>
-      <body className="font-sans bg-bg text-ink min-h-screen">
+      <body className="font-sans bg-bg text-ink min-h-[100dvh]">
         <AuthProvider>
           {children}
           <FavoritesOnboardingModal />

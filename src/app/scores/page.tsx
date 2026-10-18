@@ -22,6 +22,7 @@ import {
   type UsauSeriesStage,
 } from '@/lib/league';
 import { parseFlightsParam } from '@/lib/usau/flights';
+import { defaultSeason, pickSeason, usauSeasonLeague } from '@/lib/season-windows';
 import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
 import { getPulCurrentSeason } from '@/lib/pul/data';
@@ -118,7 +119,7 @@ export default async function HomePage({ searchParams }: Props) {
 
 /**
  * USAU results page fetch (mobile parity 2026-08-16):
- *   • ?season absent ⇒ LATEST season with data; ?season=all ⇒ every season;
+ *   • ?season absent ⇒ the level's default season; ?season=all ⇒ every season;
  *     ?season=YYYY ⇒ that year.
  *   • ?page is 1-based in the URL (absent ⇒ 1). Out-of-range pages (filters
  *     narrowed the set) clamp to the last real page with one refetch.
@@ -128,7 +129,7 @@ async function loadUsauPage(
   usauFlights: ReturnType<typeof parseFlightsParam>,
   searchParams: Props['searchParams'],
 ): Promise<UsauTournamentPage> {
-  const season = searchParams.season === 'all' ? null : await resolveUsauSeason(searchParams.season);
+  const season = searchParams.season === 'all' ? null : await resolveUsauSeason(searchParams.season, usauLevel);
   const requested = Math.min(MAX_USAU_PAGE, Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1)) - 1;
   // Eastern-date cutoff, passed explicitly so it's part of the cache key —
   // otherwise the "recent" window freezes at whenever the entry was built.
@@ -147,7 +148,7 @@ async function loadUsauSeries(
   level: UsauLevel,
   seasonParam: string | undefined,
 ): Promise<UsauSeriesStageEvents | null> {
-  const season = await resolveUsauSeason(seasonParam);
+  const season = await resolveUsauSeason(seasonParam, level);
   if (season == null) return null;
   return listSeriesStageEventsCached(usauToday(), season, stage, level);
 }
@@ -159,9 +160,11 @@ async function loadUsauSeries(
 // last real page as before.
 const MAX_USAU_PAGE = 200;
 
-/** A season that has USAU data, else the latest. */
-async function resolveUsauSeason(param: string | undefined): Promise<number | null> {
+/** A season that has USAU data, else the level's default season. Not simply the
+ *  newest: the seasons list spans every level, so early 2027 College rows
+ *  flipped Club to an empty 2027 (season-windows.ts). */
+async function resolveUsauSeason(param: string | undefined, level: UsauLevel): Promise<number | null> {
   const seasons = await listUsauSeasonsCached();
   const parsed = parseInt(param ?? '', 10);
-  return seasons.includes(parsed) ? parsed : seasons[0] ?? null;
+  return seasons.includes(parsed) ? parsed : pickSeason(seasons, defaultSeason(usauSeasonLeague(level)));
 }

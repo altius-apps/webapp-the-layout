@@ -19,7 +19,7 @@ export default function robots(): MetadataRoute.Robots {
         // deliberately NOT disallowed: their pages send noindex, which a
         // crawler only sees if it may fetch them; a blocked URL that's linked
         // somewhere public can still be listed — code and all.
-        disallow: ['/wfdf/players/by-name/', '/euf/players/by-name/', '/admin', '/api/'],
+        disallow: ['/wfdf/players/by-name/', '/euf/players/by-name/', '/players/*/thread', '/admin', '/api/'],
         crawlDelay: 10,
       },
       {

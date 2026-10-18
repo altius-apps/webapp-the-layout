@@ -10,6 +10,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { defaultSeason } from '@/lib/season-windows';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -146,13 +147,16 @@ export const PUL_CURRENT_SEASON = new Date().getFullYear();
  * visible surfaces (home, standings, default views). Read from GAMES, like
  * getWulCurrentSeason: the new season's schedule lands weeks before any of its
  * player rows, and a players-derived season kept the home page on last season
- * through the new season's opening weekend. One row.
+ * through the new season's opening weekend. One row. Never past the PUL default
+ * season, so next year's schedule landing early doesn't flip it before
+ * February (season-windows.ts).
  */
 export async function getPulCurrentSeason(): Promise<number> {
   try {
     const { data, error } = await supabase()
       .from('pul_games')
       .select('season')
+      .lte('season', defaultSeason('pul'))
       .order('season', { ascending: false })
       .limit(1)
       .maybeSingle();

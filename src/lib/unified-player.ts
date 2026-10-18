@@ -808,11 +808,13 @@ export const getUnifiedPlayerProfileMultiQuery = _getUnifiedPlayerProfile;
  * saturated the RPC times out, and the assembler then fires 6-10 MORE queries
  * that also time out. The fallback cost more than the thing that failed.
  *
- * So we only fall back on 'shape' — the RPC answered, but the payload was null
- * or unmappable. That's a data defect with a healthy DB, and the assembler is a
- * genuinely different code path that may succeed. On 'unhealthy' (timeout,
- * connection failure, 5xx) we return null immediately and let the caller render
- * the not-found/degraded state. Failing fast is the whole point.
+ * So we only fall back on 'shape' — the RPC answered, but the payload was
+ * unmappable. That's a data defect with a healthy DB, and the assembler is a
+ * genuinely different code path that may succeed. A null answer ('notfound') is
+ * authoritative: no such player, no fallback. On 'unhealthy' (timeout,
+ * connection failure, 5xx) we THROW, so the page fails with an uncached 500.
+ * Returning null there made the page call notFound(), and ISR cached that 404
+ * for a real player for the whole revalidate window (2026-10-16).
  *
  * The RPC path re-applies web's location-based UFA attribution itself, and
  * refuses payloads affected by the known upstream defects — see the header of
@@ -823,7 +825,8 @@ async function _getProfilePreferRpc(
 ): Promise<UnifiedPlayerProfile | null> {
   const viaRpc = await getProfileViaRpc(anchorId);
   if (viaRpc.status === 'ok') return viaRpc.profile;
-  if (viaRpc.status === 'unhealthy') return null;
+  if (viaRpc.status === 'notfound') return null;
+  if (viaRpc.status === 'unhealthy') throw new Error(`player profile unavailable: ${viaRpc.reason}`);
   return _getUnifiedPlayerProfile(anchorId);
 }
 

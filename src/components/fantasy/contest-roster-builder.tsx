@@ -1,7 +1,7 @@
 'use client';
 
 // Contest Roster Builder — client component.
-// Typeahead w/ 200ms debounce, slot cards, lock banner and auth-gated save,
+// Typeahead w/ 200ms debounce, slot cards and auth-gated save,
 // across a contest's settings-driven shape:
 //   weekly-stats mode → offenders+defenders slot groups + period selector
 //   event mode        → single flat flex list, no roles, one 'event' period
@@ -355,12 +355,6 @@ export function ContestRosterBuilder({ contest, pool, showRosteredPct = false }:
           </div>
         )}
 
-        <LockBanner
-          isEventMode={isEventMode}
-          week={activeWeekInfo}
-          periods={periods}
-        />
-
         {rosterLoading ? (
           <BuilderSkeleton />
         ) : isEventMode ? (
@@ -482,119 +476,6 @@ function fillSlotsFromRoster(
     base[offCount + i] = { role: 'defender', player: toHit(r), preview: null };
   });
   return base;
-}
-
-// "Fri, Jul 10, 7:00 PM ET" for a lock instant.
-function formatLock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'first game';
-  const s = d.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'America/New_York',
-  });
-  return `${s} ET`;
-}
-
-function formatReopen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'Monday';
-  return d.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'America/New_York',
-  });
-}
-
-function formatEventStart(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'the event start';
-  return d.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-// ─── Lock banner ────────────────────────────────────────────────────────────────
-
-function LockBanner({
-  isEventMode,
-  week,
-  periods,
-}: {
-  isEventMode: boolean;
-  week: FantasyWeek | null;
-  periods: ContestPeriod[];
-}) {
-  if (isEventMode) {
-    const eventPeriod = periods.find((p) => p.period === 'event');
-    if (!eventPeriod) return null;
-    if (eventPeriod.complete) {
-      return (
-        <BannerShell tone="neutral">
-          This event has finished — final scores are in.
-        </BannerShell>
-      );
-    }
-    if (week?.locked) {
-      return (
-        <BannerShell tone="live">
-          Roster is locked — the event has started.
-        </BannerShell>
-      );
-    }
-    return (
-      <BannerShell tone="quiet">
-        Locks when the event starts
-        {eventPeriod.lockAt ? ` — ${formatEventStart(eventPeriod.lockAt)}` : ''}. Edit any time before then.
-      </BannerShell>
-    );
-  }
-
-  if (!week) {
-    return (
-      <BannerShell tone="quiet">
-        No active period found. Check back once the schedule is published.
-      </BannerShell>
-    );
-  }
-
-  if (week.locked) {
-    return (
-      <BannerShell tone="live">
-        {formatWeekLabel(week.week)} is locked for the weekend
-        {week.unlockAt ? ` — editing reopens ${formatReopen(week.unlockAt)}` : ' — roster changes are disabled'}.
-      </BannerShell>
-    );
-  }
-
-  return (
-    <BannerShell tone="quiet">
-      {week.lockAt
-        ? `Locks at first game — ${formatLock(week.lockAt)}. Edit any time before then.`
-        : 'Edit your roster any time before games start.'}
-    </BannerShell>
-  );
-}
-
-function BannerShell({ tone, children }: { tone: 'live' | 'quiet' | 'neutral'; children: React.ReactNode }) {
-  const bg = tone === 'live' ? 'bg-live/[0.08]' : tone === 'neutral' ? 'bg-ink/[0.04]' : 'bg-ink/[0.04]';
-  return (
-    <div className={`flex items-center gap-3 px-4 py-3 rounded-card-sm ${bg}`}>
-      {tone === 'live' && (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0 text-live">
-          <rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )}
-      <span className="font-tight text-[13px] font-medium text-ink">{children}</span>
-    </div>
-  );
 }
 
 // ─── Player Typeahead ─────────────────────────────────────────────────────────

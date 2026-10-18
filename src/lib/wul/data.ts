@@ -12,6 +12,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { defaultSeason, pickSeason } from '@/lib/season-windows';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -142,12 +143,14 @@ export const WUL_CURRENT_SEASON = new Date().getFullYear();
  * The newest WUL season that actually has data, or the calendar year if the
  * table is empty/unreachable. Source of truth for "current season" on the
  * visible surfaces — advances on its own when new data is ingested, never
- * selects an empty season. Reuses listWulSeasons().
+ * selects an empty season. Reuses listWulSeasons(). Never past the WUL default
+ * season: next year's schedule lands ~December, before the February flip
+ * (season-windows.ts).
  */
 export async function getWulCurrentSeason(): Promise<number> {
   try {
     const seasons = await listWulSeasons();
-    return seasons[0] ?? WUL_CURRENT_SEASON;
+    return pickSeason(seasons, defaultSeason('wul')) ?? WUL_CURRENT_SEASON;
   } catch {
     return WUL_CURRENT_SEASON;
   }
@@ -165,6 +168,7 @@ export async function getWulResultsSeason(): Promise<number> {
       .from('wul_games')
       .select('season')
       .eq('status', 'final')
+      .lte('season', defaultSeason('wul'))
       .order('season', { ascending: false })
       .limit(1)
       .maybeSingle();

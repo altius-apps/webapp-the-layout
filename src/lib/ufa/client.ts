@@ -28,6 +28,7 @@ import type {
   UfaTeamStat,
   UfaTeamStatsResponse,
 } from './types';
+import { defaultSeason } from '@/lib/season-windows';
 import { teamInternalID } from './teams';
 import { isFinalStatus } from './format';
 import { getStatsPagesRoster } from './stats-pages';
@@ -626,11 +627,10 @@ export async function getUfaTeamPodiums(teamSlug: string): Promise<TeamPodium[]>
 
 // ── Season helpers ───────────────────────────────────────────────────────────
 
-/** Current UFA season year. Season runs ~April through August. */
+/** Current UFA season year. Season runs ~April through August; the default
+ *  flips to the new year on February 1 (season-windows.ts). */
 export function currentSeasonYear(now: Date = new Date()): number {
-  // Until the next season's schedule is published (typically January), the
-  // "current" season is the year we're in.
-  return now.getFullYear();
+  return defaultSeason('ufa', now);
 }
 
 /** Default years dropdown — most recent down through 2022 (UFA rebrand window). */

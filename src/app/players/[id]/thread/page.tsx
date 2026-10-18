@@ -23,17 +23,21 @@ interface Props {
   params: { id: string };
 }
 
+// Kept out of search indexes (robots.ts also disallows it): low search value and
+// a graph read on every render. No .catch on the profile reads, same reason as
+// the profile page: a DB failure must be an uncached 500, not a cached 404.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
-  if (!profile) return { title: 'The Thread · The Layout' };
+  const profile = await getUnifiedPlayerProfile(params.id);
+  if (!profile) return { title: 'The Thread · The Layout', robots: { index: false } };
   return {
     title: `${profile.displayName} — The Thread · The Layout`,
     description: `${profile.displayName}'s connection web: teammates, shared history, and paths to the game's best.`,
+    robots: { index: false },
   };
 }
 
 export default async function ThreadPage({ params }: Props) {
-  const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
+  const profile = await getUnifiedPlayerProfile(params.id);
   if (!profile) notFound();
 
   const thread = await getPlayerThread(profile.displayName, 12, 40);

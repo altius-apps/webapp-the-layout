@@ -838,7 +838,11 @@ function anonDb() {
  * the DB just timed out is how the 2026-08-12 outage turned load into collapse
  * (every timeout bought 6-10 more timeouts). So:
  *   - 'ok'       → use the profile.
- *   - 'shape'    → the RPC replied but the payload was null/unmappable. The
+ *   - 'notfound' → the RPC answered null: no such player. Authoritative (the
+ *                  RPC resolves ufa/usau/pul/wul, the same sources as the
+ *                  assembler; mobile treats null the same way). No fallback, so
+ *                  a junk id costs one cheap RPC, not the assembler.
+ *   - 'shape'    → the RPC replied but the payload was unmappable. The
  *                  assembler is a legitimate alternate path here; it's a data
  *                  defect, not a load problem, and the DB is answering fine.
  *   - 'unhealthy'→ timeout / network / 5xx. FAIL FAST. Do not run the
@@ -846,6 +850,7 @@ function anonDb() {
  */
 export type RpcProfileResult =
   | { status: 'ok'; profile: UnifiedPlayerProfile }
+  | { status: 'notfound' }
   | { status: 'shape' }
   | { status: 'unhealthy'; reason: string };
 
@@ -866,7 +871,7 @@ export async function getProfileViaRpc(anchorId: string): Promise<RpcProfileResu
       console.error('[getProfileViaRpc] rpc error', anchorId, error.message);
       return { status: 'shape' };
     }
-    if (!data) return { status: 'shape' };
+    if (!data) return { status: 'notfound' };
     const profile = await mapRpcProfile(anchorId, data as RpcProfile);
     return profile ? { status: 'ok', profile } : { status: 'shape' };
   } catch (e) {

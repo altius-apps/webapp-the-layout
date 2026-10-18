@@ -3,12 +3,15 @@
 // USAU season picker, bound to ?season=YYYY | 'all'. Lives on the /scores
 // results feed (moved off the schedule 2026-08-16 for mobile parity — the
 // schedule is future-facing, so "which season's results" belongs here).
-// Absent ?season ⇒ latest season with data; 'all' ⇒ every season.
+// Absent ?season ⇒ the level's default season (same rule as the server's
+// resolveUsauSeason); 'all' ⇒ every season.
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PillSelect } from '@/components/pill-select';
 import { listSeasons } from '@/lib/usau/data';
+import { parseLevelParam } from '@/lib/league';
+import { defaultSeason, pickSeason, usauSeasonLeague } from '@/lib/season-windows';
 
 const ALL = 'all' as const;
 
@@ -32,13 +35,15 @@ export function UsauSeasonSelect() {
 
   const raw = searchParams.get('season');
   const paramSeason = Number(raw);
+  const fallback =
+    pickSeason(seasons, defaultSeason(usauSeasonLeague(parseLevelParam(searchParams.get('level'))))) ?? seasons[0];
   const current: number | typeof ALL =
-    raw === ALL ? ALL : seasons.includes(paramSeason) ? paramSeason : seasons[0];
+    raw === ALL ? ALL : seasons.includes(paramSeason) ? paramSeason : fallback;
 
   const onChange = (next: number | typeof ALL) => {
     const params = new URLSearchParams(searchParams.toString());
-    // Latest season is the default → keep the URL clean by omitting it.
-    if (next === seasons[0]) params.delete('season');
+    // The default season → keep the URL clean by omitting it.
+    if (next === fallback) params.delete('season');
     else params.set('season', String(next));
     // A season change re-defines the result set — restart at page 1.
     params.delete('page');

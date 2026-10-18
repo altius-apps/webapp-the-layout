@@ -13,7 +13,8 @@
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.0",
-    "next": "14.2.15",
+    "@vercel/global-config": "^1.5.1",
+    "next": "14.2.35",
     "obscenity": "^0.4.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

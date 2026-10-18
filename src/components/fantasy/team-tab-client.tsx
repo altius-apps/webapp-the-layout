@@ -15,12 +15,14 @@ import {
   getTeamPlayers,
   getContestPeriods,
   periodsToWeeks,
+  type ContestPeriod,
   type ContestView,
 } from '@/lib/fantasy/leagues';
 import { getContestTeamRoster } from '@/lib/fantasy/draft';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { ContestRosterBuilder } from '@/components/fantasy/contest-roster-builder';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
+import { RosterLockInfo } from '@/components/fantasy/roster-lock-info';
 
 export function TeamTabClient({ contest, isOfficial = false }: { contest: ContestView; isOfficial?: boolean }) {
   const { user } = useAuth();
@@ -29,6 +31,8 @@ export function TeamTabClient({ contest, isOfficial = false }: { contest: Contes
   const [myTeam, setMyTeam] = useState<{ id: string; teamName: string } | null>(null);
   const [pool, setPool] = useState<FantasyPlayerHit[] | undefined>(undefined);
   const [activeWeek, setActiveWeek] = useState<string | null>(null);
+  // null until the schedule loads, so the lock notice never flashes "no active period".
+  const [contestPeriods, setContestPeriods] = useState<ContestPeriod[] | null>(null);
   const [lineup, setLineup] = useState<{ playerId: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -70,6 +74,7 @@ export function TeamTabClient({ contest, isOfficial = false }: { contest: Contes
     getContestPeriods(contest.id)
       .then((periods) => {
         if (cancelled) return;
+        setContestPeriods(periods);
         const weeks = periodsToWeeks(periods);
         if (weeks.length === 0) {
           setActiveWeek(null);
@@ -113,12 +118,21 @@ export function TeamTabClient({ contest, isOfficial = false }: { contest: Contes
 
   return (
     <div className="space-y-6">
-      <FantasyRulesModal
-        label="How scoring works"
-        mode={contest.settings.mode}
-        playerLeague={contest.competitionDef.playerLeague}
-        competition={contest.competition}
-      />
+      <div className="relative flex items-center gap-2">
+        <FantasyRulesModal
+          label="How scoring works"
+          mode={contest.settings.mode}
+          playerLeague={contest.competitionDef.playerLeague}
+          competition={contest.competition}
+        />
+        {contestPeriods && (
+          <RosterLockInfo
+            isEventMode={contest.settings.mode === 'event'}
+            periods={contestPeriods}
+            activeWeek={activeWeek}
+          />
+        )}
+      </div>
 
       <ContestRosterBuilder contest={contest} pool={pool} showRosteredPct={isOfficial} />
 

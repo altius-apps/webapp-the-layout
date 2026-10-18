@@ -24,6 +24,7 @@ import {
   listWulPlayersCached,
 } from '@/lib/cached-readers';
 import { levelLabel, parseDivisionParam, parseLeagueParam, parseLevelParam } from '@/lib/league';
+import { defaultSeason } from '@/lib/season-windows';
 import { PlayersSearchList } from '@/components/players/players-search-list';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
@@ -331,7 +332,7 @@ export default async function PlayersPage({ searchParams }: Props) {
     const currentSeason = await getWulResultsSeason();
     const requestedSeason = parseInt(searchParams.season ?? '', 10);
     const season =
-      requestedSeason >= WUL_FIRST_SEASON && requestedSeason <= currentSeasonYear()
+      requestedSeason >= WUL_FIRST_SEASON && requestedSeason <= defaultSeason('wul') + 1
         ? requestedSeason
         : currentSeason;
 
@@ -489,11 +490,16 @@ export default async function PlayersPage({ searchParams }: Props) {
     // render empty when a user lands here via a stale `?div=mixed` link.
     const isCollege = level === 'COLLEGE_D1' || level === 'COLLEGE_D3';
     const effectiveDivision = isCollege && division === 'Mixed' ? 'Men' : division;
+    // A failed list (it aggregates every season's rosters and can hit anon's
+    // 3 s timeout under load) must say so, not render as "0 players".
     const players = await listUsauPlayersCached({
       limit: 200,
       genderDivision: effectiveDivision,
       competitionLevel: level,
-    }).catch(() => [] as UsauPlayerListRow[]);
+    }).catch((err): UsauPlayerListRow[] | null => {
+      console.error('Failed to load the USAU players list:', err);
+      return null;
+    });
     return (
       <PageShell
         title="Players"
@@ -506,7 +512,7 @@ export default async function PlayersPage({ searchParams }: Props) {
         }
       >
         <PlayersSearchList
-          mode={{ kind: 'usau', players, division: effectiveDivision, level }}
+          mode={{ kind: 'usau', players: players ?? [], division: effectiveDivision, level, loadFailed: players == null }}
           scopeLabel={`${levelLabel(level)} · ${effectiveDivision}'s · all seasons`}
         />
       </PageShell>

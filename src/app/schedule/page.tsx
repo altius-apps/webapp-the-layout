@@ -17,6 +17,7 @@ import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
 import { UsauSeriesStageList } from '@/components/usau/usau-series-cards';
 import { listSeriesStageEventsCached, listUsauSeasonsCached, usauScheduleCached } from '@/lib/cached-readers';
 import { usauToday } from '@/lib/today';
+import { defaultSeason, pickSeason, usauSeasonLeague } from '@/lib/season-windows';
 import { parseFlightsParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { getPulCurrentSeason } from '@/lib/pul/data';
@@ -49,8 +50,10 @@ export default async function SchedulePage({ searchParams }: Props) {
   if (league === 'pul') {
     const currentSeason = await getPulCurrentSeason();
     const requestedSeason = parseInt(searchParams.season ?? '', 10);
+    // Up to a year past the default, so next season's published schedule can
+    // still be opened before the February flip.
     const season =
-      requestedSeason >= PUL_FIRST_SEASON && requestedSeason <= currentSeasonYear()
+      requestedSeason >= PUL_FIRST_SEASON && requestedSeason <= defaultSeason('pul') + 1
         ? requestedSeason
         : currentSeason;
     return (
@@ -92,10 +95,11 @@ export default async function SchedulePage({ searchParams }: Props) {
       levelLabel(level),
       flights.length === 1 ? FLIGHT_LABELS[flights[0]] : flights.length > 1 ? `${flights.length} flights` : null,
     ].filter(Boolean).join(' · ');
-    // Always the latest season's calendar (season browsing lives on /scores).
-    // Read server-side against the Eastern date.
+    // The level's default season (season browsing lives on /scores). Not the
+    // newest season with data: that spans every level, and early 2027 College
+    // rows hid 2026 Club Nationals (season-windows.ts). Eastern date.
     const today = usauToday();
-    const season = (await listUsauSeasonsCached())[0] ?? null;
+    const season = pickSeason(await listUsauSeasonsCached(), defaultSeason(usauSeasonLeague(level)));
     // ?series=sectionals|regionals → that stage's merged tournaments.
     const seriesStage = parseSeriesParam(searchParams.series, level);
     const series =
@@ -131,10 +135,11 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   const currentYear = currentSeasonYear();
   // Clamp to seasons that exist — an unbounded ?year= is an upstream fetch per
-  // garbage URL.
+  // garbage URL. One year past the default: next season's schedule is
+  // published in January, before the February flip.
   const requestedYear = parseInt(searchParams.year ?? '', 10);
   const year =
-    requestedYear >= UFA_FIRST_SEASON && requestedYear <= currentYear ? requestedYear : currentYear;
+    requestedYear >= UFA_FIRST_SEASON && requestedYear <= currentYear + 1 ? requestedYear : currentYear;
   const isCurrentSeason = year === currentYear;
 
   // Fetch games for the selected year; overlay live data for current season.
