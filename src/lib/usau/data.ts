@@ -1604,8 +1604,8 @@ export async function getUsauClubChampionsBySeason(): Promise<
   // season → division → champion. Placement games are sometimes tagged
   // round='final' too ("11th Place", "13th Place" at 2016 + 2024 Nationals), so
   // only gold-medal-bracket finals count and the latest-scheduled one wins. Same
-  // rule as mobile; rows come latest-first, ties by id, matching the SQL mirror
-  // _usau_club_champions_json().
+  // rule as mobile; rows come latest-first, ties by id, matching the Club subset
+  // of SQL _usau_nationals_champions().
   const result = new Map<number, Map<string, UsauChampion>>();
   const finalAt = new Map<string, number>();
   for (const g of (finals ?? []) as unknown as Row[]) {
@@ -3050,12 +3050,14 @@ export interface UsauPlayerListRow {
    *  stats. Counts DISTINCT team-seasons, not roster rows: usau_rosters is
    *  per-event, so a team playing 5 events would otherwise read as 5 stints. */
   appearances: number;
-  /** Years this player won the Club Nationals championship. Empty if none. */
+  /** Years this player's team won its level's Nationals (Club, College,
+   *  Masters). Empty if none. */
   championYears: number[];
 }
 
 /**
- * Top N USAU players by activity (number of distinct team-season stints).
+ * Top N USAU players, ranked by national titles, then Nationals trips, finishes
+ * and goals + assists, then Regionals finishes and trips (all computed in SQL).
  * Names are deduped so each human appears once even when the scraper
  * inserted multiple player_ids for them. The returned id is the anchor
  * with the most roster rows (richest profile).
@@ -3075,22 +3077,9 @@ export async function listUsauPlayers(opts?: {
   // Aggregation lives in the list_usau_players RPC (one indexed SQL pass over
   // rosters⋈teams⋈players). The old client-side path paged the ENTIRE join
   // through PostgREST in 1000-row chunks per list view — the heaviest
-  // table-read load on the DB (2026-08-11 diagnosis). Champion logic stays
-  // here: the RPC only tags championYears from the (season, division, teamId)
-  // triples we pass, and only in Club (or unfiltered) scope — a Masters/College
-  // team that happens to share a club champion's name must not inherit the badge.
-  const isClubScope = !opts?.competitionLevel || opts.competitionLevel === 'CLUB';
-  const championsBySeason = isClubScope
-    ? await getUsauClubChampionsBySeason().catch(
-        () => new Map<number, Map<string, UsauChampion>>(),
-      )
-    : new Map<number, Map<string, UsauChampion>>();
-  const champions: Array<{ season: number; division: string; team_id: string }> = [];
-  for (const [season, byDivision] of championsBySeason) {
-    for (const [division, champ] of byDivision) {
-      champions.push({ season, division, team_id: champ.teamId });
-    }
-  }
+  // table-read load on the DB (2026-08-11 diagnosis). Champions for every level
+  // and the ranking are computed there too (_usau_nationals_champions), so
+  // p_champions is no longer sent.
 
   const search = opts?.search?.trim();
   // Omitted (undefined) params fall through to the RPC's SQL defaults (null).
@@ -3100,7 +3089,6 @@ export async function listUsauPlayers(opts?: {
     p_division: opts?.genderDivision ?? undefined,
     p_level: opts?.competitionLevel ?? undefined,
     p_search: search && search.length >= 2 ? search : undefined,
-    p_champions: champions,
   });
   if (error) throw error;
   return (data ?? []) as unknown as UsauPlayerListRow[];

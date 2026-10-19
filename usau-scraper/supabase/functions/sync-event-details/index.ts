@@ -821,6 +821,18 @@ async function resolveTeam(
   if (lookupErr && lookupErr.code !== 'PGRST116') throw lookupErr;
   if (existing) return existing.id;
 
+  // Known USAU spellings of an existing team ("Rhino" for "Rhino Slam!") map to
+  // its canonical name (usau_team_name_aliases). The usau_teams trigger applies
+  // the same mapping on insert, so the lookup below must use it too, or a
+  // variant would miss the season's row and insert a duplicate.
+  const { data: canonicalName, error: canonErr } = await db.rpc('usau_canonical_team_name', {
+    p_name: team.displayName,
+    p_division: genderDivision,
+    p_level: competitionLevel,
+  });
+  if (canonErr) throw canonErr;
+  const teamName = (canonicalName as string | null) ?? team.displayName;
+
   // Not seen by id — is this squad already in the DB for this SEASON under a
   // different EventTeamId? Two ways that happens: USAU churns the id mid-event
   // (late re-registration / re-seed), or the same club simply entered another
@@ -834,7 +846,7 @@ async function resolveTeam(
     'team_id, usau_teams!inner(id, name, gender_division, competition_level, usau_event_team_ids)';
   const nameFilters = (q: ReturnType<typeof db.from>) =>
     q
-      .eq('usau_teams.name', team.displayName)
+      .eq('usau_teams.name', teamName)
       .eq('usau_teams.gender_division', genderDivision)
       .eq('usau_teams.competition_level', competitionLevel);
 
@@ -899,7 +911,7 @@ async function resolveTeam(
   const { data: created, error: insertErr } = await db
     .from('usau_teams')
     .insert({
-      name: team.displayName,
+      name: teamName,
       usau_event_team_ids: [team.eventTeamId],
       competition_level: competitionLevel,
       gender_division: genderDivision,

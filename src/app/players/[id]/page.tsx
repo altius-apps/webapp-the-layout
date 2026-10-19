@@ -10,7 +10,7 @@
 
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getUnifiedPlayerProfile } from '@/lib/unified-player';
+import { getUnifiedPlayerProfile, type UnifiedPlayerProfile } from '@/lib/unified-player';
 import { UnifiedProfile } from '@/components/players/unified-player-profile';
 import { DivisionSync } from '@/components/players/division-sync';
 import { getApprovedContentForPlayers } from '@/lib/player-content/server';
@@ -36,6 +36,16 @@ interface Props {
   params: { id: string };
 }
 
+// One canonical per person. USAU creates an id per event registration and every
+// id in the resolved cluster renders the same profile, so all of them point at
+// the cluster's smallest id (verified symmetric on prod, 2026-10-18). UFA, PUL
+// and WUL have one id per person; cross-league pairs stay separate pages.
+function canonicalPlayerId(profile: UnifiedPlayerProfile): string {
+  if (profile.anchorLeague !== 'usau') return profile.anchorId;
+  const ids = profile.contentRefs.filter((r) => r.kind === 'usau').map((r) => r.ref.toLowerCase());
+  return [profile.anchorId.toLowerCase(), ...ids].sort()[0];
+}
+
 // No .catch on the profile reads: a DB failure must surface as an uncached 500,
 // never as a notFound() that ISR caches as a 404 for a real player.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -43,9 +53,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!profile) return { title: 'Player not found · The Layout' };
   return {
     title: `${profile.displayName} · The Layout`,
-    // Canonical without ?from= so crawlers collapse the league-suffixed
-    // variants into one page instead of crawling each as a duplicate.
-    alternates: { canonical: `/players/${params.id}` },
+    // Also drops ?from=, so league-suffixed variants collapse into one page.
+    alternates: { canonical: `/players/${canonicalPlayerId(profile)}` },
   };
 }
 
