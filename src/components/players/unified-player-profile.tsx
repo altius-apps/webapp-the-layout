@@ -124,8 +124,8 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
           are separate: USAU only publishes goals/assists at flagship events
           (Nationals, Pro Champs, U.S. Open, college championships), so these
           are event totals, not per-game stats. Shown whenever the player has
-          any USAU events, even with zero tracked stats (Events/Scored still
-          tell a story). */}
+          any USAU events, even with zero tracked stats (Events still tells a
+          story). */}
       {career.usauEventsPlayed > 0 && (
         <section className="mb-10" aria-labelledby="usau-career-heading">
           <h2
@@ -134,17 +134,11 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
           >
             USAU career
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 bg-surface rounded-card-lg shadow-card overflow-hidden">
+          <div className="grid grid-cols-3 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat label="Events" value={career.usauEventsPlayed} />
-            <CareerStat label="Scored" value={career.usauEventsWithStats} />
             <CareerStat label="Goals" value={career.usauGoals} />
             <CareerStat label="Assists" value={career.usauAssists} />
           </div>
-          {career.usauEventsWithStats > 0 && career.usauEventsWithStats < career.usauEventsPlayed && (
-            <p className="mt-3 text-[10px] font-medium text-faint font-tight">
-              USAU recorded goals or assists for this player at {career.usauEventsWithStats} of {career.usauEventsPlayed} events.
-            </p>
-          )}
         </section>
       )}
 
@@ -413,15 +407,7 @@ function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
 function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number }) {
   const totalGoals = stint.events.reduce((s, e) => s + (e.goals ?? 0), 0);
   const totalAssists = stint.events.reduce((s, e) => s + (e.assists ?? 0), 0);
-  const scored = stint.events.filter((e) => e.hasStats).length;
-  const hasStats = scored > 0;
-  // Partial coverage: this player has a USAU stats row at SOME but not all of
-  // this season's events. USAU's leaderboards only list players with ≥1 goal
-  // or assist, so a missing row means "event not tracked" OR "tracked, 0/0" —
-  // indistinguishable per player. Swap the EVTS cell for SCORED k/n and say
-  // so in the caption. Summary cells are `hidden sm:flex` (see
-  // YearSummaryCells), so on mobile the caption is the only notice.
-  const partialCoverage = scored > 0 && scored < stint.events.length;
+  const hasStats = stint.events.some((e) => e.hasStats);
 
   return (
     <details className="group [&[open]>summary]:bg-surface-hi">
@@ -453,9 +439,7 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
         {hasStats ? (
           <YearSummaryCells
             cells={[
-              partialCoverage
-                ? { label: 'SCORED', value: `${scored}/${stint.events.length}` }
-                : { label: 'EVTS', value: stint.events.length },
+              { label: 'EVTS', value: stint.events.length },
               { label: 'G', value: totalGoals },
               { label: 'A', value: totalAssists },
             ]}
@@ -467,11 +451,6 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
         )}
       </summary>
       <div className="px-4 pt-2 pb-4 border-t border-hairline">
-        {partialCoverage && (
-          <p className="mb-2 text-[10px] font-medium text-faint font-tight">
-            USAU recorded goals or assists for this player at {scored} of {stint.events.length} events.
-          </p>
-        )}
         {stint.events.length === 0 ? (
           <div className="py-4 text-[12px] text-faint font-tight">No events recorded.</div>
         ) : (
