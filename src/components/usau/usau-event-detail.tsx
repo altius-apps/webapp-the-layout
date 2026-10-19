@@ -347,6 +347,13 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     games = event.games.filter((g) => {
       if (inDivision(g)) return true;
       if (g.teamAId != null || g.teamBId != null) return false;
+      // The division page USAU listed the row on is authoritative. The id-block
+      // rule below misfiled 2026 Club Nationals, whose ids run Mixed pools →
+      // Women → Mixed bracket → Men, so Mixed lost its Bracket tab and Women
+      // showed two brackets. The page only names the GENDER, so on a multi-level
+      // event (combined masters) it would pull every level's rows into each level:
+      // single-level events only. The heuristics stay for everything else.
+      if (g.scheduleDivision && levelTeams.length === event.teams.length) return g.scheduleDivision === division;
       if (g.bracketName && g.location) {
         if (divisionFields.get(g.bracketName)?.has(fieldCluster(g.location))) return true;
       }

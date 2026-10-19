@@ -4221,7 +4221,18 @@ export interface UsauEventSummary {
      *  game-id ranges, so the single-event division heuristics would misfile
      *  their games. Null everywhere else. */
     division: string | null;
+    /** Division of the USAU schedule page the row was scraped from
+     *  (source_url `…/schedule/<Men|Women|Mixed>/…`). Authoritative for a
+     *  team-less bracket row, which the event page can't place by its teams.
+     *  Null on rows from other sources (play.usaultimate.org, ultirzr). */
+    scheduleDivision: 'Men' | 'Women' | 'Mixed' | null;
   }>;
+}
+
+/** The division segment of an HTML-scraped schedule URL (…/schedule/Mixed/Club-Mixed/). */
+function scheduleDivisionOf(url: string | null): 'Men' | 'Women' | 'Mixed' | null {
+  const m = url?.match(/\/schedule\/(Men|Women|Mixed)\//);
+  return m ? (m[1] as 'Men' | 'Women' | 'Mixed') : null;
 }
 
 /** Numeric USAU schedule-row id, preferring usau_game_id. Hash-form ids → null. */
@@ -5007,6 +5018,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
     bracket_slot: number | null;
     next_usau_game_id: string | null;
     next_slot_side: string | null;
+    source_url: string | null;
     team_a: { name: string } | null;
     team_b: { name: string } | null;
   };
@@ -5040,7 +5052,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
             `id, event_id, round, bracket_name, team_a_id, team_b_id,
              seed_a, seed_b, score_a, score_b, winner_team_id, location, scheduled_at, status,
              usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
-             bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side,
+             bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side, source_url,
              team_a:usau_teams!team_a_id(name),
              team_b:usau_teams!team_b_id(name)`,
           )
@@ -5144,6 +5156,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       nextSlotSide: g.next_slot_side === 'top' || g.next_slot_side === 'btm' ? g.next_slot_side : null,
       usauGameId: g.usau_game_id ?? null,
       division: divisionOf.get(g.event_id) ?? null,
+      scheduleDivision: scheduleDivisionOf(g.source_url),
     });
     rawByEvent.set(g.event_id, list);
   }
