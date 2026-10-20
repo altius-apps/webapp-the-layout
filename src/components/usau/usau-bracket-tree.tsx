@@ -324,14 +324,17 @@ function MatchCard({
   season?: number | null;
 }) {
   const game = slot.game;
+  const tag = `G${slot.number}`;
 
   // Wholly-synthesized slot (no stored row at all): a pure placeholder card
-  // with only its "W of …" side labels. The empty strip keeps the card the
-  // same height as real ones, which the tree's row pitch assumes.
+  // with only its "W of …" side labels and game-number tag. The blank span
+  // keeps the strip the same height as real cards when the tag is hidden
+  // (mobile), which the tree's row pitch assumes.
   if (!game) {
     return (
       <article className="bg-surface rounded-card-sm overflow-hidden shadow-card">
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
+          <StatusPill tone="upcoming" label="" tag={tag} />
           <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight">{' '}</span>
         </div>
         <TeamLine
@@ -396,7 +399,7 @@ function MatchCard({
       ].join(' ')}
     >
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
-        <StatusPill tone={tone} label={label} />
+        <StatusPill tone={tone} label={label} tag={tag} />
         {/* Field + time. The bracket previously showed time only, so the field
             number was unavailable on exactly the games spectators travel for.
             `location` is usually a bare number ("7") but occasionally a full
@@ -510,9 +513,14 @@ type Tone = 'final' | 'live' | 'upcoming' | 'tbd' | 'cancelled';
 function StatusPill({
   tone,
   label,
+  tag,
 }: {
   tone: Tone;
   label: string;
+  /** Game number within its round ("G1") — USAU's own bracket-sheet numbering.
+   *  Leads the strip, before the status label. Desktop only: on mobile's
+   *  narrow columns it truncated the field/time (Hunter, 2026-10-20). */
+  tag?: string;
 }) {
   const toneClass = {
     final: 'text-faint',
@@ -524,6 +532,11 @@ function StatusPill({
 
   return (
     <span className="inline-flex items-center gap-1.5">
+      {tag && (
+        <span className="hidden lg:inline-flex items-center rounded-full bg-ink/5 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.1em] text-muted font-tight tabular">
+          {tag}
+        </span>
+      )}
       {label && (
         <span
           className={`inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${toneClass}`}
