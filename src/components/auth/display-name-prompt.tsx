@@ -70,7 +70,7 @@ export default function DisplayNamePrompt() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="display-name-prompt-title"
-      className="fixed inset-0 z-[110] flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[110] flex items-center justify-center px-4 py-6 bg-black/40 backdrop-blur-sm"
     >
       <form
         onSubmit={(e) => {

@@ -111,7 +111,7 @@ export function WaiverClaimDialog({ contest, teamId, addPlayer, onClose, onDone 
       role="dialog"
       aria-modal="true"
       aria-labelledby="waiver-claim-title"
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

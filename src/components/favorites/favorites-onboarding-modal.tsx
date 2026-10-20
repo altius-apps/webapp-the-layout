@@ -115,7 +115,7 @@ export function FavoritesOnboardingModal() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="fav-onboarding-title"
-      className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6 bg-black/40 backdrop-blur-sm"
       onPointerDown={(e) => {
         // Click-outside = skip (skippable by design).
         if (e.target === e.currentTarget) close();

@@ -111,10 +111,13 @@ function isPlacementPoolGroup(name: string, games: Game[]): boolean {
 
 /** Matchup rounds — pool-less Saturday phases like Cooler Classic 37 Men's
  *  "Sat Round 1/2/3": stored round='other' with the tab label as bracket_name.
- *  Not a pool, not a crossover, not placement — they get their own Rounds tab. */
-function isMatchupRound(g: { round: string; bracketName: string | null }): boolean {
+ *  Not a pool, not a crossover, not placement — they get their own Rounds tab.
+ *  A row with a scraped bracket column is a bracket game whatever its round
+ *  (2025 Nationals Men's "Pro Flight Play-In" deciders are round='other'). */
+function isMatchupRound(g: { round: string; bracketName: string | null; bracketStageIndex: number | null }): boolean {
   return (
     g.round === 'other' &&
+    g.bracketStageIndex == null &&
     !isCrossoverBracket(g.bracketName) &&
     !isPoolBracket(g.bracketName) &&
     !isPlacementName(g.bracketName)

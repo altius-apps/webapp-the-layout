@@ -246,7 +246,7 @@ export function InviteMenu({
       {open &&
         (sheet
           ? createPortal(
-              <div className="fixed inset-0 z-[100] flex items-end bg-ink/40">
+              <div className="fixed inset-0 z-[100] flex items-end bg-black/40">
                 <div
                   ref={panelRef}
                   className="w-full bg-surface rounded-t-card-lg shadow-hero p-3 pb-[max(env(safe-area-inset-bottom),12px)]"

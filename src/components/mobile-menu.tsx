@@ -1495,7 +1495,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
       {/* Dim layer */}
       <div
         className={[
-          'absolute inset-0 bg-ink/50 transition-opacity',
+          'absolute inset-0 bg-black/50 transition-opacity',
           open ? 'opacity-100' : 'opacity-0',
           // Skip transition when reduced motion is preferred.
           'motion-reduce:transition-none',

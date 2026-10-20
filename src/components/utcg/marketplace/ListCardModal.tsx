@@ -3,7 +3,7 @@
 // ListCardModal — bottom-sheet for listing an owned card on the market,
 // either for a coin price (Sell) or for open trade offers (Trade). Opened
 // from CollectionGrid (tap a card -> onListCard) via UtcgGame's `listingCard`
-// state. Same modal shell as SlotPicker in squad-builder.tsx (bg-ink/40
+// state. Same modal shell as SlotPicker in squad-builder.tsx (bg-black/40
 // backdrop, bottom-sheet on mobile / centered on desktop, Escape-to-close).
 
 import { useEffect, useState } from 'react';
@@ -60,7 +60,7 @@ export function ListCardModal({ card, marketAccess, onClose, onListed }: ListCar
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-ink/40 motion-safe:animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-black/40 motion-safe:animate-fade-in" onClick={onClose} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"

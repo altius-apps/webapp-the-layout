@@ -175,6 +175,90 @@ function parseGameSlot(name: string | undefined): number | null {
   return n != null && n >= 0 && n <= 32767 ? n : null;
 }
 
+/** Sortable venue wall-clock instant for an ultirzr game; null when it has no
+ *  real date/time (unscheduled games carry 01/01/0001). */
+function gameClock(gm: UltirzrGame): number | null {
+  const md = (gm.StartDate ?? '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  const mt = (gm.StartTime ?? '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!md || !mt || parseInt(md[3], 10) < 2000) return null;
+  const h = (parseInt(mt[1], 10) % 12) + (mt[3].toUpperCase() === 'PM' ? 12 : 0);
+  return Date.UTC(parseInt(md[3], 10), parseInt(md[1], 10) - 1, parseInt(md[2], 10), h, parseInt(mt[2], 10));
+}
+
+function median(xs: number[]): number {
+  const s = xs.slice().sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+function gameWinner(gm: UltirzrGame): number | null {
+  const a = parseScore(gm.HomeTeamScore);
+  const b = parseScore(gm.AwayTeamScore);
+  if (a == null || b == null || a === b) return null;
+  return (a > b ? gm.HomeTeamId : gm.AwayTeamId) ?? null;
+}
+
+/** +1 when stages read final-first, -1 when reversed, 0 when the data can't
+ *  tell — by whatever times exist, else by which stage's winners reappear in
+ *  which. Only used when some stage has no times at all. */
+function stageOrientation(stages: UltirzrStage[]): number {
+  let score = 0;
+  for (let i = 0; i + 1 < stages.length; i++) {
+    const ti = (stages[i].Games ?? []).map(gameClock).filter((t): t is number => t != null);
+    const tj = (stages[i + 1].Games ?? []).map(gameClock).filter((t): t is number => t != null);
+    if (ti.length && tj.length) score += Math.sign(median(ti) - median(tj));
+  }
+  if (score !== 0) return Math.sign(score);
+  let flow = 0;
+  for (let i = 0; i + 1 < stages.length; i++) {
+    const teamsOf = (gs: UltirzrGame[]) => new Set(gs.flatMap((g) => [g.HomeTeamId, g.AwayTeamId]).filter((t) => t));
+    const inI = teamsOf(stages[i].Games ?? []);
+    const inJ = teamsOf(stages[i + 1].Games ?? []);
+    flow += (stages[i + 1].Games ?? []).filter((g) => inI.has(gameWinner(g) ?? undefined)).length;
+    flow -= (stages[i].Games ?? []).filter((g) => inJ.has(gameWinner(g) ?? undefined)).length;
+  }
+  return Math.sign(flow);
+}
+
+/** Round depth a column title names (0 = decider), or null if unclear.
+ *  "Play-in" is not a depth: 2025 Club Nationals' "Pro Flight Play-In / 7th
+ *  Place (tie)" is its section's decider. */
+function stageLabelRank(name: string | undefined): number | null {
+  const t = (name ?? '').toLowerCase();
+  if (/play.?in|cross|game.?to.?go|backdoor|consol/.test(t)) return null;
+  if (t.includes('semi')) return 1;
+  if (/pre.?(quart|quater|qtr)/.test(t)) return 3;
+  if (/quart|quater|qtr/.test(t)) return 2;
+  if (/final|champ/.test(t)) return 0;
+  return null;
+}
+
+/** Column index per stage, 0 = the deciding column. ultirzr usually lists
+ *  stages final-first, but not always: Philly Invite 2018 lists Finals, then
+ *  Pre-Quarters, Quarters, Semis; others are scrambled. Rank by play time
+ *  (latest = 0, ties keep list order), then let titles that name a round put
+ *  those stages in round order among their own positions — ultirzr's times are
+ *  sometimes wrong too (Riverside Classic 2019 lists its Final at 10 AM). Same
+ *  rule as usau-scraper/scripts/backfill-bracket-structure.py. */
+function stageIndexes(stages: UltirzrStage[]): number[] {
+  const n = stages.length;
+  const meds = stages.map((st) => {
+    const ts = (st.Games ?? []).map(gameClock).filter((t): t is number => t != null);
+    return ts.length ? median(ts) : null;
+  });
+  const idx = Array.from({ length: n }, (_, i) => i);
+  const cols = meds.every((m) => m != null)
+    ? idx.slice().sort((a, b) => meds[b]! - meds[a]! || a - b)
+    : stageOrientation(stages) >= 0 ? idx : idx.slice().reverse();
+  const ranks = stages.map((st) => stageLabelRank(st.StageName));
+  const named = cols.map((s, k) => (ranks[s] != null ? k : -1)).filter((k) => k >= 0);
+  const reordered = named.map((k) => cols[k]).sort((a, b) => ranks[a]! - ranks[b]! || cols.indexOf(a) - cols.indexOf(b));
+  named.forEach((k, j) => { cols[k] = reordered[j]; });
+  const out = new Array<number>(n);
+  cols.forEach((s, k) => { out[s] = k; });
+  return out;
+}
+
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (err && typeof err === 'object') {
@@ -590,8 +674,8 @@ async function ingestEvent(
     game: UltirzrGame;
     bracket: string | null;
     stage: string | null;
-    /** Position of the stage within its bracket — ultirzr lists stages
-     *  FINAL-FIRST like USAU's own markup, so 0 is the deciding column. */
+    /** Column of the stage within its bracket, 0 = the deciding column
+     *  (stageIndexes — ultirzr's list order isn't reliably final-first). */
     stageIndex: number | null;
   };
   const teamSeen = new Map<number, TeamSeenInfo>();
@@ -611,7 +695,9 @@ async function ingestEvent(
       }
       // Bracket play
       for (const b of r.Brackets ?? []) {
-        (b.Stage ?? []).forEach((st, stageIndex) => {
+        const indexes = stageIndexes(b.Stage ?? []);
+        (b.Stage ?? []).forEach((st, i) => {
+          const stageIndex = indexes[i];
           for (const gm of st.Games ?? []) {
             collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen, meta);
             collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen, meta);

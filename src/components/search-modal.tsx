@@ -153,7 +153,7 @@ export function SearchModal({ open, onClose }: Props) {
         type="button"
         aria-label="Close search"
         onClick={onClose}
-        className="absolute inset-0 bg-ink/40 backdrop-blur-sm cursor-default"
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm cursor-default"
       />
 
       {/* Panel */}

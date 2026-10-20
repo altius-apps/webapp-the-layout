@@ -100,7 +100,7 @@ function DialogShell({
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div
-        className="absolute inset-0 bg-ink/40 motion-safe:animate-fade-in"
+        className="absolute inset-0 bg-black/40 motion-safe:animate-fade-in"
         onClick={dismiss}
         aria-hidden="true"
       />

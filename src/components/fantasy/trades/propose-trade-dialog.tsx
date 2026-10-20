@@ -150,7 +150,7 @@ export function ProposeTradeDialog({ contest, myTeam, otherTeams, initialTeamId,
       role="dialog"
       aria-modal="true"
       aria-labelledby="propose-trade-title"
-      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

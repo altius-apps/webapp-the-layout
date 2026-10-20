@@ -6,7 +6,7 @@
 // chips + live sbcMet() give instant legality feedback before submit; the
 // server re-checks everything and is the source of truth.
 //
-// Picker shell copied from SquadBuilder's SlotPicker (bg-ink/40 backdrop +
+// Picker shell copied from SquadBuilder's SlotPicker (bg-black/40 backdrop +
 // bottom-sheet-on-mobile/centered-on-desktop + Escape-to-close) — the
 // established modal idiom for the whole game.
 
@@ -195,7 +195,7 @@ function SbcPicker({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-ink/40 motion-safe:animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-black/40 motion-safe:animate-fade-in" onClick={onClose} aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"

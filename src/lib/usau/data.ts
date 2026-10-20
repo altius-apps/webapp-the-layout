@@ -4235,10 +4235,20 @@ function scheduleDivisionOf(url: string | null): 'Men' | 'Women' | 'Mixed' | nul
   return m ? (m[1] as 'Men' | 'Women' | 'Mixed') : null;
 }
 
-/** Numeric USAU schedule-row id, preferring usau_game_id. Hash-form ids → null. */
+/** USAU's schedule-row ids run sequentially down the bracket sheet (~420k in
+ *  2026; no pre-2025 bracket round spans more than 86k). Games on USAU's 2025
+ *  platform carry random 7–9 digit ids instead (2025 Club Nationals Women's
+ *  QFs: 82554085, 510013619, 118427905, 632628857), which sorted every legacy
+ *  bracket built from them into a scrambled order. */
+const MAX_SHEET_ORDER_ID = 1_000_000;
+
+/** Numeric USAU schedule-row id, preferring usau_game_id. Hash-form and
+ *  random-platform ids → null, so seed order takes over. */
 function parseUsauGameOrder(gameId: string | null, eventGameId: string | null): number | null {
   for (const v of [gameId, eventGameId]) {
-    if (v && /^\d+$/.test(v.trim())) return parseInt(v, 10);
+    if (!v || !/^\d+$/.test(v.trim())) continue;
+    const n = parseInt(v, 10);
+    if (n < MAX_SHEET_ORDER_ID) return n;
   }
   return null;
 }
