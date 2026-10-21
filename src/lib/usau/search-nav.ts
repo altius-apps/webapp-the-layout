@@ -39,6 +39,8 @@ export interface SearchResult {
    *  word, 2 prefix, 3 contains/fuzzy. Lets the modal ORDER GROUPS by best
    *  match so a strong player hit can outrank weak team hits. Lower = better. */
   matchRank?: number;
+  /** Tournaments only: the season, so tournament results list newest first. */
+  season?: number;
 }
 
 /**

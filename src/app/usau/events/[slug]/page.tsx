@@ -15,6 +15,7 @@ import { PageShell } from '@/components/page-shell';
 import { SourceLink } from '@/components/source-link';
 import {
   getNationalsField,
+  getTournamentEditions,
   isNationalsChampionshipName,
   loadUsauEvent,
   resolveUsauEvent,
@@ -29,6 +30,7 @@ import { EventVenue, UsauEventVenue } from '@/components/usau/usau-event-venue';
 import { UsauSeriesFavoriteStar } from '@/components/usau/usau-series-favorite-star';
 import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
+import { UsauEditionSelect } from '@/components/usau/usau-edition-select';
 import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { USAU_LEVELS, buildLeagueQs, seriesListHref, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
@@ -100,6 +102,14 @@ export default async function UsauEventPage({ params }: Props) {
   const fieldEligible = isClubNationals && noTeamsPosted;
   const nationalsField: NationalsFieldState | null = fieldEligible ? await loadNationalsField(event.season) : null;
 
+  // Other years of the same tournament (Club Nationals, US Open, TCT flights…)
+  // for the header's year picker. Untracked events return [] without a read.
+  // A failed read just hides the picker.
+  const editions = await getTournamentEditions(event.name).catch((err) => {
+    console.error('[usau/events] getTournamentEditions failed', err);
+    return [];
+  });
+
   const subtitle = formatSubtitle(event);
   const eyebrowParts = [
     event.competitionLevel,
@@ -147,6 +157,7 @@ export default async function UsauEventPage({ params }: Props) {
       controls={
         (
           <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+            {editions.length > 0 && <UsauEditionSelect season={event.season} editions={editions} />}
             {event.members.length > 0 ? (
               // A merged event links the USAU page of the division being viewed.
               <Suspense

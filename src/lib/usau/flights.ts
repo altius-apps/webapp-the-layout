@@ -127,3 +127,31 @@ export function parseFlightsParam(raw: string | null | undefined): Flight[] {
   // Return in canonical order (not URL order) for a stable cache key + UI.
   return FLIGHTS.filter((f) => chosen.has(f));
 }
+
+/**
+ * Which recurring tournament an event is an edition of, so its page can offer
+ * the other years ("2024 USA Ultimate Club Championships" and "2026 USA
+ * Ultimate Club Nationals" are both `club-nationals`). Name-based for the same
+ * reason as FLIGHT_RULES: slugs and names drift year to year, the keywords
+ * don't. East/West regular-season events carry a side suffix (`pro-elite:east`);
+ * years that ran one combined event have none. Null = not a tracked series.
+ * The nationals exclusions mirror SQL usau_is_nationals_name.
+ */
+export function tournamentSeriesKey(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const n = normalizeEventName(name);
+  const side = /\beast\b/.test(n) ? ':east' : /\bwest\b/.test(n) ? ':west' : '';
+  if (/\bu ?s open\b/.test(n)) return /youth|\bycc\b/.test(n) ? 'us-open-youth' : 'us-open';
+  if (/\bpro championship|pro flight finale/.test(n)) return 'pro-championships';
+  if (n.includes('pro elite plus')) return 'pro-elite-plus';
+  if (n.includes('pro elite challenge')) return `pro-elite${side}`;
+  if (n.includes('elite select challenge')) return 'elite-select';
+  if (n.includes('select flight')) return `select-flight${side}`;
+  if (/regional|sectional|conference|tune ?up|warm ?up|\binvite\b|wucc|wmucc|wjuc|\bworlds?\b|high school|middle school|\byouth\b|state championship/.test(n)) {
+    return null;
+  }
+  if (n.includes('masters championship')) return 'masters-nationals';
+  if (n.includes('college championship')) return /\bd iii\b|\bd3\b|\bd 3\b/.test(n) ? 'd3-nationals' : 'd1-nationals';
+  if (/club nationals|club championship|national championship/.test(n)) return 'club-nationals';
+  return null;
+}

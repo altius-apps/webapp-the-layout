@@ -14,7 +14,7 @@ import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { loadNameAliases } from '@/lib/name-aliases';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
+import { flightForName, FLIGHT_LABELS, tournamentSeriesKey, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
@@ -3214,7 +3214,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
 
   type TeamRow = { id: string; name: string; state: string | null; competition_level: string | null; gender_division: string | null };
   type PlayerRow = { id: string; display_name: string };
-  type EventRow = { slug: string; name: string; season: number; start_date: string | null; end_date: string | null; division: string | null };
+  type EventRow = { slug: string; name: string; season: number; start_date: string | null; end_date: string | null; division: string | null; score: number };
 
   // ── Dedupe teams by (lower(name), competition_level) ─────────────────
   // RPC returns rows already ranked by score; first occurrence wins.
@@ -3266,6 +3266,11 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       hint: hintParts.join(' · ') || null,
       flight: flightForName(ev.name),
       league: 'usau',
+      season: ev.season,
+      // The RPC's strong hits (text, year, or the "nationals" synonym — whose
+      // old "Club Championships" names never contain the query) rank as a
+      // name-start match; fuzzy-only hits as contains.
+      matchRank: ev.score >= 0.99 ? 1 : 3,
     });
   }
 
@@ -3275,18 +3280,63 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
     ...tournamentMap.values(),
   ];
 
-  // Prefix matches first, then alphabetical — except when two results are the
-  // same event across years (e.g. "Heavyweights 2024" vs "Heavyweights 2026"),
-  // where we want newest-first instead of oldest-first alphabetical.
+  // Prefix matches first (a tournament: the RPC's strong hits), then
+  // tournaments newest season first, everything else alphabetical — except
+  // the same event across years, newest first.
   const lower = q.toLowerCase();
+  const strong = (r: SearchResult) =>
+    r.kind === 'tournament' ? r.matchRank === 1 : r.name.toLowerCase().startsWith(lower);
   results.sort((a, b) => {
-    const ap = a.name.toLowerCase().startsWith(lower) ? 0 : 1;
-    const bp = b.name.toLowerCase().startsWith(lower) ? 0 : 1;
+    const ap = strong(a) ? 0 : 1;
+    const bp = strong(b) ? 0 : 1;
     if (ap !== bp) return ap - bp;
+    if (a.season != null && b.season != null && a.season !== b.season) return b.season - a.season;
     return compareByNameThenYearDesc(a.name, b.name);
   });
 
   return results.slice(0, limit * 2);
+}
+
+export interface TournamentEdition {
+  season: number;
+  slug: string;
+}
+
+/**
+ * Other years of the same recurring tournament (tournamentSeriesKey), newest
+ * first, one per season — for the event page's year picker. Candidates are
+ * the flighted events plus every nationals-style name (~130 rows), so one
+ * bounded read per render. East/West events list their own side, falling back
+ * to a year's combined edition; a combined edition prefers combined, then
+ * East. Empty when the event isn't a tracked series or has no other year.
+ */
+export async function getTournamentEditions(name: string): Promise<TournamentEdition[]> {
+  const key = tournamentSeriesKey(name);
+  if (!key) return [];
+  const [family, side] = key.split(':');
+  const db = await supabase();
+  const { data, error } = await db
+    .from('usau_events')
+    .select('usau_slug, name, season')
+    .or('flight_rank.lt.9,name.ilike.*national championship*,name.ilike.*college championship*,name.ilike.*masters championship*');
+  if (error) throw error;
+
+  const bySeason = new Map<number, { slug: string; side: string }[]>();
+  for (const r of data ?? []) {
+    const k = tournamentSeriesKey(r.name);
+    if (!k || k.split(':')[0] !== family) continue;
+    const list = bySeason.get(r.season) ?? [];
+    list.push({ slug: r.usau_slug, side: k.split(':')[1] ?? '' });
+    bySeason.set(r.season, list);
+  }
+  const prefer = side ? [side, ''] : ['', 'east', 'west'];
+  const editions: TournamentEdition[] = [];
+  for (const [season, list] of bySeason) {
+    const pick = prefer.map((s) => list.find((e) => e.side === s)).find(Boolean);
+    if (pick) editions.push({ season, slug: pick.slug });
+  }
+  editions.sort((a, b) => b.season - a.season);
+  return editions.length > 1 ? editions : [];
 }
 
 // ─── Detail pages: team / player / event ───────────────────────────────

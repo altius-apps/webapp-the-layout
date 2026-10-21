@@ -303,6 +303,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     name: e.name,
     hint: ['WFDF', String(e.year)].filter(Boolean).join(' · '),
     league: 'wfdf',
+    season: e.year,
   }));
 
   // EUF teams — the RPC returns one row PER EVENT, so a club that has entered
@@ -355,6 +356,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     name: e.name,
     hint: ['EUCS', String(e.year)].filter(Boolean).join(' · '),
     league: 'euf',
+    season: e.year,
   }));
 
   const merged = [
@@ -388,7 +390,9 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   // Stamp each result with its match tier so the client can also ORDER THE
   // GROUPS by best match (a strong player hit can outrank weak team hits,
   // instead of Teams always rendering first).
-  for (const r of merged) r.matchRank = matchTier(r.name, needle);
+  // USAU tournaments arrive pre-ranked by the event RPC (year filter +
+  // "nationals" synonym), which a name check can't reproduce.
+  for (const r of merged) r.matchRank ??= matchTier(r.name, needle);
 
   merged.sort((a, b) => {
     const ra = a.matchRank ?? 3;
@@ -397,6 +401,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     const pa = prom(a);
     const pb = prom(b);
     if (pa !== pb) return pb - pa; // higher prominence first
+    // Tournaments newest season first (Hunter, 2026-10-20).
+    if (a.season != null && b.season != null && a.season !== b.season) return b.season - a.season;
     // Same event across years (e.g. Heavyweights 2024/2026) → newest first.
     return compareByNameThenYearDesc(a.name, b.name);
   });
