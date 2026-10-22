@@ -88,8 +88,8 @@ interface ParsedGame {
   round: GameRound;
   bracket_name: string | null;
   /** null = TBD slot (bracket game whose feeder hasn't finished — "W of
-   *  Semifinals G2"). Only bracket games may carry null sides; pool rows
-   *  always have both teams. */
+   *  Semifinals G2", or a schedule-table row USAU lists as "TBD" until pool
+   *  play ends). Only rows with a stable USAU id may carry null sides. */
   home_event_team_id: string | null;
   away_event_team_id: string | null;
   home_seed: number | null;
@@ -104,9 +104,9 @@ interface ParsedGame {
    *  for scored games, unplayed games and a double forfeit ("F - F"). */
   forfeit_winner: 'home' | 'away' | null;
   /** USAU's own placeholder text for a TBD side ("P1 of Saturday Pool Play
-   *  Pool A", "W of Quarterfinals G1") — the bracket cell's plain text when it
-   *  has no team link. Null whenever the side has a real team, so a later
-   *  scrape clears it as slots fill. */
+   *  Pool A", "W of Quarterfinals G1", a schedule table's "TBD") — the bracket
+   *  or table cell's plain text when it has no team link. Null whenever the
+   *  side has a real team, so a later scrape clears it as slots fill. */
   home_placeholder: string | null;
   away_placeholder: string | null;
   /** Bracket structure straight from USAU's markup (null on pool rows and on
@@ -555,8 +555,8 @@ function parseSchedule(html: string, tz: string | null, refDate: string | null):
           // which zeroed the whole division (persistSchedulePage skips a page
           // with no teams). Store as round='other' named by the TAB (the
           // organizing unit the USAU page shows), caption as fallback. Rows
-          // without both team links still skip below, so a genuinely unknown
-          // table shape contributes nothing.
+          // without both team links AND without a game id still skip below,
+          // so a genuinely unknown table shape contributes nothing.
           tableRound = 'other';
           poolName = currentSection?.trim() || captionBase;
         }
@@ -574,21 +574,35 @@ function parseSchedule(html: string, tz: string | null, refDate: string | null):
           const $awayLink = $cells.eq(4).find('a').first();
           const homeEventTeamId = extractEventTeamId($homeLink.attr('href') ?? '');
           const awayEventTeamId = extractEventTeamId($awayLink.attr('href') ?? '');
-          if (!homeEventTeamId || !awayEventTeamId) return; // TBD slot
+
+          // Prefer the data-game attribute on the row (numeric internal
+          // game id). Fall back to parsing the match-report link's
+          // EventGameId param in the Options cell.
+          const dataGame = $tr.attr('data-game')?.trim() ?? '';
+          const $matchLink = $cells.find('a[href*="match_report"]').first();
+          const usau_event_game_id =
+            dataGame ||
+            extractEventGameId($matchLink.attr('href') ?? '');
+
+          // TBD slots (2026 Club Nationals crossovers: "TBD" vs "TBD" until
+          // pool play ends) are kept when the row has a stable id, same rule
+          // as bracket games below — the next scrape fills the teams in via
+          // the usau_event_game_id match. No id + any TBD side still skips.
+          if ((!homeEventTeamId || !awayEventTeamId) && !usau_event_game_id) return;
 
           const home = extractTeamNameAndSeed($homeLink.text());
           const away = extractTeamNameAndSeed($awayLink.text());
 
           // Collect teams (don't overwrite existing entries since the
           // standings table is parsed first with the same data).
-          if (!teamsByEventTeamId.has(homeEventTeamId)) {
+          if (homeEventTeamId && !teamsByEventTeamId.has(homeEventTeamId)) {
             teamsByEventTeamId.set(homeEventTeamId, {
               eventTeamId: homeEventTeamId,
               displayName: home.name,
               seed: home.seed,
             });
           }
-          if (!teamsByEventTeamId.has(awayEventTeamId)) {
+          if (awayEventTeamId && !teamsByEventTeamId.has(awayEventTeamId)) {
             teamsByEventTeamId.set(awayEventTeamId, {
               eventTeamId: awayEventTeamId,
               displayName: away.name,
@@ -612,15 +626,6 @@ function parseSchedule(html: string, tz: string | null, refDate: string | null):
             status,
           );
 
-          // Prefer the data-game attribute on the row (numeric internal
-          // game id). Fall back to parsing the match-report link's
-          // EventGameId param in the Options cell.
-          const dataGame = $tr.attr('data-game')?.trim() ?? '';
-          const $matchLink = $cells.find('a[href*="match_report"]').first();
-          const usau_event_game_id =
-            dataGame ||
-            extractEventGameId($matchLink.attr('href') ?? '');
-
           const scheduled_at = combineDateTimeMaybe(dateText, timeText, tz, refDate);
 
           games.push({
@@ -638,9 +643,14 @@ function parseSchedule(html: string, tz: string | null, refDate: string | null):
             scheduled_at,
             status,
             forfeit_winner,
-            // Pool rows always have both teams — no placeholder text exists.
-            home_placeholder: null,
-            away_placeholder: null,
+            // An unlinked side's cell text ("TBD") is USAU's placeholder;
+            // null once the side has a team, so a re-scrape clears it.
+            home_placeholder: homeEventTeamId
+              ? null
+              : $cells.eq(3).text().replace(/\s+/g, ' ').trim() || null,
+            away_placeholder: awayEventTeamId
+              ? null
+              : $cells.eq(4).text().replace(/\s+/g, ' ').trim() || null,
             bracket_stage: null,
             bracket_stage_index: null,
             bracket_slot: null,
@@ -927,12 +937,24 @@ async function ensureEvent(
   db: ReturnType<typeof supabase>,
   slug: string,
 ): Promise<string> {
-  const { data: existing } = await db
+  // Case-insensitive: USAU's router ignores case, so "2026-foo" passes the
+  // existence check below for a stored "2026-Foo" — an exact match would mint
+  // a second event that then takes over the real one's games (they match on
+  // usau_event_game_id). `_` is an ILIKE wildcard, so escape it; `%` and `\`
+  // are rejected in run().
+  const { data: existing, error: lookupErr } = await db
     .from('usau_events')
     .select('id')
-    .eq('usau_slug', slug)
+    .ilike('usau_slug', slug.replace(/_/g, '\\_'))
     .maybeSingle();
+  if (lookupErr) throw lookupErr;
   if (existing) return existing.id;
+
+  // The function is public (verify_jwt=false), so a never-seen slug must be a
+  // real USAU event before it gets a row — otherwise any caller could mint
+  // junk events. USAU 404s an unknown event page (checked 2026-10-22);
+  // fetchHtml throws on that (and on 403/5xx), so nothing is inserted.
+  await fetchHtml(`${BASE_URL}/events/${slug}/`);
 
   // Stub the event row from the slug. We don't know dates/city/etc. yet —
   // sync-events will fill those in later if the event ever appears on the
@@ -1489,9 +1511,25 @@ interface RequestBody {
 async function run(body: RequestBody) {
   const slug = body.slug?.trim();
   if (!slug) throw new Error('Request body must include { slug }');
+  // The function is public (verify_jwt=false) and the slug is spliced into
+  // USAU URLs, source_url and a stub event row. A real slug is one path
+  // segment; `\` and `%` are rejected too since fetch reads `\` as `/` and
+  // `%2F` is an encoded one, and `.`/`..` would collapse as dot-segments.
+  // Blocklist, not allowlist: real slugs carry curly quotes ("Surf-‘n-Turf").
+  // 0 of 4,486 stored slugs (max length 87) trip any of these.
+  if (slug.length > 120 || /[/?#\\%\s\x00-\x1f\x7f]/.test(slug) || /^\.+$/.test(slug)) {
+    throw new Error(`Invalid slug: ${JSON.stringify(slug)}`);
+  }
+  const DIVISIONS: readonly Division[] = ['Men', 'Mixed', 'Women'];
+  if (
+    body.divisions !== undefined &&
+    (!Array.isArray(body.divisions) || body.divisions.some((d) => !DIVISIONS.includes(d)))
+  ) {
+    throw new Error(`Invalid divisions: ${JSON.stringify(body.divisions)}`);
+  }
 
   const divisions: Division[] = body.divisions?.length
-    ? body.divisions
+    ? [...new Set(body.divisions)]
     : ['Men', 'Women', 'Mixed'];
 
   const db = supabase();
@@ -1503,9 +1541,12 @@ async function run(body: RequestBody) {
   // (calendar discovery) with the right level, so this lookup picks that up.
   const { data: eventRow } = await db
     .from('usau_events')
-    .select('competition_level, state, start_date')
+    .select('usau_slug, competition_level, state, start_date')
     .eq('id', eventUUID)
     .maybeSingle();
+  // Build URLs (and so source_url) from the stored slug, not a case variant
+  // the caller sent.
+  const eventSlug = (eventRow?.usau_slug as string | undefined) ?? slug;
   // Venue timezone (for converting USAU's local schedule times → UTC). Derived
   // from the event's US state; when USAU lists the venue as "TBD" (every 2026
   // Sectional, 32 events on 2026-09-11) fall back to the zone most of the
@@ -1544,7 +1585,7 @@ async function run(body: RequestBody) {
 
   for (const div of divisions) {
     perDivision[div] = await syncDivision(
-      db, eventUUID, slug, div, competitionLevel, tz,
+      db, eventUUID, eventSlug, div, competitionLevel, tz,
       (eventRow?.start_date as string | null | undefined) ?? null,
     );
     totalTeams += perDivision[div].teams;
