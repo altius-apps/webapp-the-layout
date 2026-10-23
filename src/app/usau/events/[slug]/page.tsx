@@ -157,7 +157,13 @@ export default async function UsauEventPage({ params }: Props) {
       controls={
         (
           <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
-            {editions.length > 0 && <UsauEditionSelect season={event.season} editions={editions} />}
+            {/* Desktop shows the year picker in the view-tab row instead
+                (UsauEventDetail, Hunter 2026-10-22). */}
+            {editions.length > 0 && (
+              <div className="lg:hidden">
+                <UsauEditionSelect season={event.season} editions={editions} />
+              </div>
+            )}
             {event.members.length > 0 ? (
               // A merged event links the USAU page of the division being viewed.
               <Suspense
@@ -235,7 +241,7 @@ export default async function UsauEventPage({ params }: Props) {
           500'd (FUNCTION_INVOCATION_FAILED) until this boundary. Same pattern
           as page-shell.tsx and usau-team-history.tsx. */}
       <Suspense>
-        <UsauEventDetail event={event} nationalsField={nationalsField} />
+        <UsauEventDetail event={event} nationalsField={nationalsField} editions={editions} />
       </Suspense>
     </PageShell>
   );

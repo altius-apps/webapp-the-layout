@@ -10,7 +10,16 @@ import { useRouter } from 'next/navigation';
 import { PillSelect } from '@/components/pill-select';
 import type { TournamentEdition } from '@/lib/usau/data';
 
-export function UsauEditionSelect({ season, editions }: { season: number; editions: TournamentEdition[] }) {
+export function UsauEditionSelect({
+  season,
+  editions,
+  align,
+}: {
+  season: number;
+  editions: TournamentEdition[];
+  /** Menu edge — 'right' when the picker sits at the row's right edge. */
+  align?: 'left' | 'right';
+}) {
   const router = useRouter();
 
   function handleChange(next: number) {
@@ -33,6 +42,7 @@ export function UsauEditionSelect({ season, editions }: { season: number; editio
         value={season}
         onChange={handleChange}
         ariaLabel="Select tournament year"
+        align={align}
         options={editions.map((e) => ({ value: e.season, label: String(e.season) }))}
       />
     </div>

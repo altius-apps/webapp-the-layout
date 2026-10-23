@@ -68,6 +68,10 @@ interface DivisionPagerProps<V extends string> {
    *  and its scroller shrinks to the leftover width; without it, the control
    *  centers as before (Hunter's tournament-header layout, 2026-08-20). */
   tabRowLeading?: ReactNode;
+  /** Rendered RIGHT of the division control on lg+ only (USAU event page's
+   *  year picker, Hunter 2026-10-22). Passing it — even null — centers the
+   *  control between the leading tabs and this slot on lg+. */
+  tabRowTrailing?: ReactNode;
   /** Control-only headers (no tabRowLeading): stretch the control full width
    *  with equal segments, the same as the event pages' control under the view
    *  tabs on mobile widths — 16px above, 14px to the content. */
@@ -137,9 +141,14 @@ export function DivisionPager<V extends string>({
   renderDivision,
   contentClassName,
   tabRowLeading,
+  tabRowTrailing,
   fill = false,
   swipe = true,
 }: DivisionPagerProps<V>) {
+  const centered = tabRowTrailing !== undefined;
+  const trailing = tabRowTrailing != null && (
+    <div className="hidden lg:flex lg:items-center lg:justify-end">{tabRowTrailing}</div>
+  );
   // Optimistic active. Screens hold `active` in the URL (?div= via
   // useViewParam → router.replace), so the prop updates FRAMES after
   // onChange. Rendering from the prop alone painted the OLD division into
@@ -428,7 +437,10 @@ export function DivisionPager<V extends string>({
     if (tabRowLeading == null) return <>{renderRef.current(only)}</>;
     return (
       <div className="flex flex-col">
-        <div className="sticky top-0 z-30 bg-bg pt-4 pb-4">{tabRowLeading}</div>
+        <div className="sticky top-0 z-30 bg-bg pt-4 pb-4 lg:flex lg:items-center lg:justify-between lg:gap-3">
+          {tabRowLeading}
+          {trailing}
+        </div>
         {renderRef.current(only)}
       </div>
     );
@@ -446,7 +458,9 @@ export function DivisionPager<V extends string>({
         className={[
           'flex overflow-x-auto scrollbar-none',
           tabRowLeading != null
-            ? 'min-w-0 w-full lg:w-auto lg:flex-1 lg:justify-end'
+            ? centered
+              ? 'min-w-0 w-full lg:w-auto lg:justify-center'
+              : 'min-w-0 w-full lg:w-auto lg:flex-1 lg:justify-end'
             : fill
               ? 'min-w-0 w-full'
               : 'justify-center pb-2',
@@ -504,9 +518,16 @@ export function DivisionPager<V extends string>({
     // stuck header would show cards scrolling through it.
     <div className="flex flex-col">
       {tabRowLeading != null ? (
-        <div className="sticky top-0 z-30 bg-bg flex flex-col gap-3.5 pt-4 pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <div
+          className={[
+            'sticky top-0 z-30 bg-bg flex flex-col gap-3.5 pt-4 pb-4 lg:items-center lg:gap-3',
+            // Equal 1fr side columns keep the control dead-center on the row.
+            centered ? 'lg:grid lg:grid-cols-[1fr_auto_1fr]' : 'lg:flex-row lg:justify-between',
+          ].join(' ')}
+        >
           <div className="shrink-0">{tabRowLeading}</div>
           {segmentScroller}
+          {trailing}
         </div>
       ) : (
         <div

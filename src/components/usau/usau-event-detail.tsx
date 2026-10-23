@@ -17,7 +17,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { UsauEventSummary } from '@/lib/usau/data';
+import type { TournamentEdition, UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
@@ -29,6 +29,7 @@ import { gameWinnerId, isForfeit } from '@/lib/usau/game-winner';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager, scrollToSectionTop } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { UsauEditionSelect } from '@/components/usau/usau-edition-select';
 import { NationalsFieldPanel, type NationalsFieldState } from '@/components/usau/nationals-field';
 import { NATIONALS_DIVISIONS } from '@/lib/usau/nationals-field';
 
@@ -155,9 +156,12 @@ interface Props {
   /** The projected Club Nationals field (FIELD tab). The route passes it only
    *  for a club Nationals with no teams posted; null/absent everywhere else. */
   nationalsField?: NationalsFieldState | null;
+  /** Other years of this tournament — the year picker in the view-tab row on
+   *  desktop (mobile keeps it in the page header). */
+  editions?: TournamentEdition[];
 }
 
-export function UsauEventDetail({ event, nationalsField = null }: Props) {
+export function UsauEventDetail({ event, nationalsField = null, editions = [] }: Props) {
   // The FIELD tab exists once the field has a qualifier (or its read failed,
   // which shows the generic error copy). Before any qualifier, nothing new
   // renders at all.
@@ -249,6 +253,7 @@ export function UsauEventDetail({ event, nationalsField = null }: Props) {
       eventDivisions={eventDivisions}
       gender={gender}
       field={field}
+      editions={editions}
     />
   );
 }
@@ -735,8 +740,11 @@ function EventTabsView(props: {
   eventDivisions: UsauDivision[];
   gender: string;
   field: NationalsFieldState | null;
+  editions: TournamentEdition[];
 }) {
-  const { event, level, availableLevels, levelTeams, eventDivisions, gender, field } = props;
+  const { event, level, availableLevels, levelTeams, eventDivisions, gender, field, editions } = props;
+  const editionSelect =
+    editions.length > 0 ? <UsauEditionSelect season={event.season} editions={editions} align="right" /> : null;
 
   // Tab lives in the URL (?tab=) so back-nav from a team page and hard refresh
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
@@ -797,10 +805,19 @@ function EventTabsView(props: {
           (pools/games/brackets/tabs) is derived fresh per call via
           buildDivisionData/DivisionContent — nothing here closes over a
           single "active" division anymore. */}
+      {/* No divisions → the pager renders nothing, so the desktop year picker
+          (hidden in the page header on lg+) needs its own row. */}
+      {eventDivisions.length === 0 && editionSelect && (
+        <div className="hidden lg:flex justify-end pt-4">{editionSelect}</div>
+      )}
+
       <DivisionPager
         divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
         active={activeGender}
         onChange={setDivision}
+        // Desktop: tabs left, division pills centered, year right (Hunter,
+        // 2026-10-22).
+        tabRowTrailing={editionSelect}
         // Always passed, even for a one-tab division: without it the pager
         // lays the division pills out compact and centered, so switching into
         // a pools-only or bracket-only division resized the switcher.
