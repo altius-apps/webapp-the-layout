@@ -281,7 +281,12 @@ function withFieldTab(
  *  for the active division every render, and for the neighbor division mid-
  *  swipe, so it must be a pure function of `division` (not the closed-over
  *  active gender that the pre-pager version relied on). */
-function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division: string) {
+function buildDivisionData(
+  event: UsauEventSummary,
+  level: UsauLevel | '',
+  levelTeams: Team[],
+  division: string,
+) {
   // ── Filter teams + games by gender ────────────────────────────────────
   // (Same logic/comments as the pre-pager version — see git history — just
   // parameterized on `division` instead of the closed-over `gender`.)
@@ -358,10 +363,14 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
       // The division page USAU listed the row on is authoritative. The id-block
       // rule below misfiled 2026 Club Nationals, whose ids run Mixed pools →
       // Women → Mixed bracket → Men, so Mixed lost its Bracket tab and Women
-      // showed two brackets. The page only names the GENDER, so on a multi-level
-      // event (combined masters) it would pull every level's rows into each level:
-      // single-level events only. The heuristics stay for everything else.
-      if (g.scheduleDivision && levelTeams.length === event.teams.length) return g.scheduleDivision === division;
+      // showed two brackets. On a multi-level event (combined masters) the gender
+      // alone would pull every level's rows into each level, so the page's level
+      // segment must match too; a College page names no D-I/D-III level, so those
+      // rows keep the heuristics below.
+      if (g.scheduleDivision) {
+        if (levelTeams.length === event.teams.length) return g.scheduleDivision === division;
+        if (level && g.scheduleLevel) return g.scheduleDivision === division && g.scheduleLevel === level;
+      }
       if (g.bracketName && g.location) {
         if (divisionFields.get(g.bracketName)?.has(fieldCluster(g.location))) return true;
       }
@@ -767,8 +776,8 @@ function EventTabsView(props: {
   // rendered division for the sections themselves.
   const effectiveDivision = activeGender ?? eventDivisions[0] ?? '';
   const divisionData = useMemo(
-    () => buildDivisionData(event, levelTeams, effectiveDivision),
-    [event, levelTeams, effectiveDivision],
+    () => buildDivisionData(event, level, levelTeams, effectiveDivision),
+    [event, level, levelTeams, effectiveDivision],
   );
   const { tabs: visibleTabs, defaultTab } = withFieldTab(divisionData.visibleTabs, divisionData.defaultTab, field != null);
   const activeTab: ViewTab =
@@ -890,8 +899,8 @@ function DivisionContent({
     roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
     visibleTabs: divisionTabs, defaultTab: divisionDefault,
   } = useMemo(
-    () => buildDivisionData(event, levelTeams, division),
-    [event, levelTeams, division],
+    () => buildDivisionData(event, level, levelTeams, division),
+    [event, level, levelTeams, division],
   );
   const { tabs: visibleTabs, defaultTab } = withFieldTab(divisionTabs, divisionDefault, field != null);
 

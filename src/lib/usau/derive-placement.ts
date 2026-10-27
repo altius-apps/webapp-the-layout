@@ -42,6 +42,9 @@
 //   • EXCLUDE non-placement brackets (Play-In, Qualification) — they decide
 //     next-season seeding / Worlds qualification, not this event's finish. A
 //     numbered game-to-go ("2nd Place Game to Go") awards its place.
+//   • Except the Pro Flight play-in's deciders: two parallel sections each end
+//     in a game for a share of one place ("Pro Flight Play-In / 7th Place
+//     (tie)"). Both winners tie at N, both losers at N+2.
 //   • Only status='final' games are results; a cancelled one only fills out
 //     its section's shape.
 //
@@ -50,7 +53,8 @@
 //
 // ⚠️ MIRROR: usau-scraper/supabase/functions/_shared/derive-placement.ts is a
 // SYNCED COPY (edge functions can't import src/). After any change re-copy the
-// body below the header and redeploy sync-event-details + ingest-from-ultirzr.
+// body below the header and redeploy sync-event-details. (ingest-from-ultirzr
+// was undeployed 2026-10-27; redeploy it too only if it's brought back.)
 
 export interface DerivePlacementGame {
   teamAId: string | null;
@@ -376,6 +380,39 @@ function sectionSemis(cols: DerivePlacementGame[][]): DerivePlacementGame[] {
 // Second-chance sections, often named without a place ("Game-To-Go Bracket").
 const SECOND_CHANCE_RE = /game.?to.?go|g2g|back.?door/i;
 
+const PLAY_IN_RE = /play[\s-]*in/gi;
+// Labels are hand-typed: "Pro Fight", "Pro Fligh", "Pro-Flight".
+const TIE_SECTION_RE = /\bpro[\s-]*f(?:l?ight|ligh)\b|\btie\b/i;
+
+/**
+ * The Pro Flight play-in's deciders by the place they split. USAU Club
+ * Nationals runs two parallel play-in sections, (A) and (B), whose column-0
+ * game each awards a share of one place ("Pro Flight Play-In / 7th Place
+ * (tie)", "Seventh Place (tie)"): 2026 Men, DiG beat Johnny Bravo → DiG T-7,
+ * JB T-9. Only played deciders count — an unplayed TBD row keeps its column
+ * and has no division, so it would join every division's tie. A place only
+ * one such game names isn't a tie (2017's single play-in bracket), and a
+ * decider stored twice counts once.
+ */
+function tieDeciders(shape: DerivePlacementGame[]): Map<number, DerivePlacementGame[]> {
+  const byPlace = new Map<number, DerivePlacementGame[]>();
+  const pairsSeen = new Set<string>();
+  for (const g of shape) {
+    const name = g.bracketName ?? '';
+    if (!scored(g) || g.bracketStageIndex !== 0 || !name.match(PLAY_IN_RE)) continue;
+    if (!TIE_SECTION_RE.test(`${name} ${g.bracketStage ?? ''}`)) continue;
+    const place =
+      bracketBasePlace((g.bracketStage ?? '').replace(PLAY_IN_RE, ' ')) ??
+      bracketBasePlace(name.replace(PLAY_IN_RE, ' '));
+    if (place == null) continue;
+    const pair = [g.teamAId, g.teamBId].sort().join('|');
+    if (pairsSeen.has(pair)) continue;
+    pairsSeen.add(pair);
+    byPlace.set(place, [...(byPlace.get(place) ?? []), g]);
+  }
+  return new Map([...byPlace].filter(([, gs]) => gs.length > 1));
+}
+
 /**
  * The bracket sections whose stored shape checks out against USAU's own links:
  * every game carries its column and id, column 0 holds one game that feeds
@@ -587,6 +624,17 @@ function divisionPlacements(
   for (const [base, bg] of byBase) for (const g of bg) play(g, start.get(base)!);
 
   const awards: Award[] = [];
+  // Play-in deciders splitting a place no named bracket starts at. Claiming it
+  // keeps the semi losers who then played them from also tying at it.
+  for (const [place, gs] of tieDeciders(shape)) {
+    if (claims.has(place)) continue;
+    claims.set(place, gs.length);
+    for (const g of gs) {
+      play(g, place);
+      const at = timeOf(g);
+      awards.push({ team: winner(g), place, base: place, at }, { team: loser(g), place: place + gs.length, base: place, at });
+    }
+  }
   const pending: PendingSemiLosers[] = [];
   for (const [base, bg] of byBase) {
     const b = start.get(base)!;

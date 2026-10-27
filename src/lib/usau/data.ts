@@ -4276,6 +4276,10 @@ export interface UsauEventSummary {
      *  team-less bracket row, which the event page can't place by its teams.
      *  Null on rows from other sources (play.usaultimate.org, ultirzr). */
     scheduleDivision: 'Men' | 'Women' | 'Mixed' | null;
+    /** Level named by that page's second segment (`…/Grand-Masters-Men/`), so
+     *  a combined masters event can place its team-less rows per level. Null
+     *  for College (the segment doesn't say D-I or D-III) and other sources. */
+    scheduleLevel: UsauLevel | null;
   }>;
 }
 
@@ -4283,6 +4287,20 @@ export interface UsauEventSummary {
 function scheduleDivisionOf(url: string | null): 'Men' | 'Women' | 'Mixed' | null {
   const m = url?.match(/\/schedule\/(Men|Women|Mixed)\//);
   return m ? (m[1] as 'Men' | 'Women' | 'Mixed') : null;
+}
+
+/** The level segment of the same URL: `Club-Men`/`ClubMen`, `Masters-Men`,
+ *  `Grand-Masters-Men`, `Great-Grand-Masters-Men` (the scraper's
+ *  eventScheduleUrlVariants forms). */
+function scheduleLevelOf(url: string | null): UsauLevel | null {
+  const m = url?.match(/\/schedule\/(Men|Women|Mixed)\/([A-Za-z-]+?)-?\1\//);
+  switch (m?.[2]) {
+    case 'Club': return 'CLUB';
+    case 'Masters': return 'MASTERS';
+    case 'Grand-Masters': return 'GRAND_MASTERS';
+    case 'Great-Grand-Masters': return 'GREAT_GRAND_MASTERS';
+    default: return null;
+  }
 }
 
 /** USAU's schedule-row ids run sequentially down the bracket sheet (~420k in
@@ -5217,6 +5235,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       usauGameId: g.usau_game_id ?? null,
       division: divisionOf.get(g.event_id) ?? null,
       scheduleDivision: scheduleDivisionOf(g.source_url),
+      scheduleLevel: scheduleLevelOf(g.source_url),
     });
     rawByEvent.set(g.event_id, list);
   }

@@ -31,6 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `${ev.name} · WFDF · The Layout` };
 }
 
+// "Aug 15–22, 2026" within a month, "Jun 28 – Jul 5, 2026" across one.
 function fmtDates(start: string | null, end: string | null): string | undefined {
   if (!start) return undefined;
   const s = new Date(start + 'T00:00:00Z');
@@ -38,6 +39,10 @@ function fmtDates(start: string | null, end: string | null): string | undefined 
   const startStr = s.toLocaleDateString('en-US', opts);
   if (!end || end === start) return `${startStr}, ${s.getUTCFullYear()}`;
   const e = new Date(end + 'T00:00:00Z');
+  if (e.getUTCFullYear() !== s.getUTCFullYear()) {
+    return `${startStr}, ${s.getUTCFullYear()} – ${e.toLocaleDateString('en-US', opts)}, ${e.getUTCFullYear()}`;
+  }
+  if (e.getUTCMonth() === s.getUTCMonth()) return `${startStr}–${e.getUTCDate()}, ${e.getUTCFullYear()}`;
   return `${startStr} – ${e.toLocaleDateString('en-US', opts)}, ${e.getUTCFullYear()}`;
 }
 
@@ -45,7 +50,7 @@ export default async function WfdfEventPage({ params }: Props) {
   const ev = await getEvent(params.slug);
   if (!ev) notFound();
 
-  const dates = fmtDates(ev.startDate, ev.endDate);
+  const metaLine = [fmtDates(ev.startDate, ev.endDate), ev.location].filter(Boolean).join(' · ');
 
   return (
     <>
@@ -55,34 +60,29 @@ export default async function WfdfEventPage({ params }: Props) {
       <PageShell
       title={ev.name}
       eyebrow={`WFDF · ${ev.isNationalTeams ? 'National Teams' : 'Club'}`}
-      // Logo sits left of the big title; dates over location right-align on the
-      // same row (mirrors the mobile app header — replaces the old sticky
-      // event bar, which floated over content on scroll).
+      // One header row, same on the app (Hunter, 2026-10-27): logo, name, star
+      // and WFDF link inline; dates · venue on one muted line under the name.
+      // Phones get the compact row (back chevron, no eyebrow); desktop keeps
+      // the eyebrow and full-size title.
       titleLeft={<WfdfEventLogo logoUrl={ev.logoUrl} year={ev.year} variant="hero" />}
+      metaLine={metaLine || undefined}
+      compactHeaderMobile
       controls={
-        (
-          <div className="flex items-start gap-2">
-            <div className="flex flex-col items-end text-right font-tight leading-tight gap-0.5">
-              {dates && <span className="text-[12px] lg:text-[14px] font-semibold text-ink">{dates}</span>}
-              {ev.location && (
-                <span className="text-[11px] lg:text-[13px] text-muted">{ev.location}</span>
-              )}
-              <WfdfSourceLink
-                href={wfdfEventUrl({ sourceOrigin: ev.sourceOrigin, staticBase: ev.staticBase })}
-                label="WFDF site"
-              />
-            </div>
-            <EventFavoriteStar
-                event={{
-                  league: 'wfdf',
-                  eventId: ev.id,
-                  name: ev.name,
-                  startDate: ev.startDate,
-                  endDate: ev.endDate,
-                }}
-              />
-          </div>
-        )
+        <div className="flex items-center gap-1">
+          <EventFavoriteStar
+            event={{
+              league: 'wfdf',
+              eventId: ev.id,
+              name: ev.name,
+              startDate: ev.startDate,
+              endDate: ev.endDate,
+            }}
+          />
+          <WfdfSourceLink
+            href={wfdfEventUrl({ sourceOrigin: ev.sourceOrigin, staticBase: ev.staticBase })}
+            label="WFDF site"
+          />
+        </div>
       }
       breadcrumbs={[
         { label: 'Home', href: '/' },

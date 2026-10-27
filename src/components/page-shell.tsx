@@ -132,6 +132,9 @@ interface PageShellProps {
   titleSize?: 'default' | 'compact';
   /** Short caption between the title and content. */
   subtitle?: string;
+  /** One muted line under the title (an event's dates · venue). Unlike
+   *  `subtitle`, the compact mobile header shows it too. */
+  metaLine?: string;
   /** Small uppercase eyebrow above the title (e.g., "UFA · 2026 Season"). */
   eyebrow?: string;
   /** Optional right-side controls in the page header (filter dropdowns, year selector, etc.). */
@@ -170,6 +173,7 @@ interface PageShellProps {
 export function PageShell({
   title,
   subtitle,
+  metaLine,
   eyebrow,
   controls,
   titleLeft,
@@ -195,7 +199,13 @@ export function PageShell({
             Desktop keeps the standard breadcrumb/eyebrow/h1 stack unchanged. */}
         {compactHeaderMobile && (
           <div className="lg:hidden">
-            <CompactHeader title={title} breadcrumbs={breadcrumbs} controls={controls} />
+            <CompactHeader
+              title={title}
+              titleLeft={titleLeft}
+              metaLine={metaLine}
+              breadcrumbs={breadcrumbs}
+              controls={controls}
+            />
           </div>
         )}
 
@@ -205,6 +215,7 @@ export function PageShell({
           <PageHeader
             title={title}
             subtitle={subtitle}
+            metaLine={metaLine}
             eyebrow={eyebrow}
             titleLeft={titleLeft}
             titleSize={titleSize}
@@ -282,6 +293,7 @@ function StickyName({ name }: { name: string }) {
 function PageHeader({
   title,
   subtitle,
+  metaLine,
   eyebrow,
   titleLeft,
   titleSize,
@@ -289,11 +301,15 @@ function PageHeader({
 }: {
   title: string;
   subtitle?: string;
+  metaLine?: string;
   eyebrow?: string;
   titleLeft?: React.ReactNode;
   titleSize?: 'default' | 'compact';
   controls?: React.ReactNode;
 }) {
+  const meta = metaLine && (
+    <p className="m-0 mt-2 text-muted font-medium font-tight text-[13px] lg:text-[15px]">{metaLine}</p>
+  );
   const h1 = (
     <h1
       className={[
@@ -315,10 +331,17 @@ function PageHeader({
         {titleLeft ? (
           <div className="flex items-center gap-3 lg:gap-4 min-w-0">
             {titleLeft}
-            {h1}
+            {/* The meta line hangs under the title text, not the mark. */}
+            <div className="min-w-0">
+              {h1}
+              {meta}
+            </div>
           </div>
         ) : (
-          h1
+          <>
+            {h1}
+            {meta}
+          </>
         )}
         {subtitle && (
           <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[15px]">
@@ -335,15 +358,21 @@ function PageHeader({
 //
 // Collapses the breadcrumb + big italic <h1> stack into one row: back
 // chevron, page title (truncates), and `controls` (e.g. a year pill)
-// right-aligned. Reuses Breadcrumbs' smart-back logic (pop real history when
+// right-aligned. A `titleLeft` mark sits before the title and a `metaLine`
+// runs under it, the mark spanning both lines (WFDF events, mobile app
+// parity). Reuses Breadcrumbs' smart-back logic (pop real history when
 // it leads back to the same parent; otherwise a plain link) so behavior
 // matches the desktop breadcrumb exactly — only the presentation differs.
 function CompactHeader({
   title,
+  titleLeft,
+  metaLine,
   breadcrumbs,
   controls,
 }: {
   title: string;
+  titleLeft?: React.ReactNode;
+  metaLine?: string;
   breadcrumbs?: Crumb[];
   controls?: React.ReactNode;
 }) {
@@ -372,10 +401,18 @@ function CompactHeader({
           </svg>
         </Link>
       )}
-      <h1 className="min-w-0 flex-1 truncate m-0 font-display italic text-[19px] font-bold tracking-[-0.01em] text-ink">
-        {title}
-      </h1>
-      {controls && <div className="flex-shrink-0 flex items-center gap-2">{controls}</div>}
+      {titleLeft}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="min-w-0 flex-1 truncate m-0 font-display italic text-[19px] font-bold tracking-[-0.01em] text-ink">
+            {title}
+          </h1>
+          {controls && <div className="flex-shrink-0 flex items-center gap-2">{controls}</div>}
+        </div>
+        {metaLine && (
+          <p className="m-0 truncate text-[12px] font-medium font-tight text-muted">{metaLine}</p>
+        )}
+      </div>
     </div>
   );
 }

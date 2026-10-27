@@ -31,8 +31,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.ingest-from-ultirzr]
-# Same rationale as sync-events.
-verify_jwt = false
+# Undeployed 2026-10-27, source kept. Every deploy (bare or by name) skips it
+# while this is false.
+enabled = false
 
 [functions.resolve-event-team-urls]
 # Same rationale as sync-events.
