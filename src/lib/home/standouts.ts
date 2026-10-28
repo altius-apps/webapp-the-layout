@@ -1,6 +1,6 @@
 // Home-page "Standout Performances" — the best individual player stat-lines
 // from recent games, for the rotating carousel. UFA / PUL / WUL are wired
-// (per-game box scores), plus USAU Club Nationals (event-level G/A totals).
+// (per-game box scores), plus USAU Club Nationals (event-level G/A/D/T totals).
 // Every wired league contributes whenever it has recent games; a card retires
 // on its own significance — a good line lasts a few days, a killer performance
 // up to WINDOW_DAYS — so after a season ends the rail thins out line by line,
@@ -86,6 +86,9 @@ export interface StandoutLine {
   ts: number;
   /** Internal — `${league}-${gameId}` for the per-game cap. */
   gameKey: string;
+  /** Internal — rotation lane: the league, or `usau-${division}` for USAU
+   *  (each Nationals division gets its own share of the rail). */
+  lane: string;
 }
 
 const MS_DAY = 86_400_000;
@@ -93,7 +96,7 @@ const MS_DAY = 86_400_000;
  *  ("3-ish weeks" — Hunter, 2026-09-11). gateThreshold() decides what survives
  *  inside it. */
 const WINDOW_DAYS = 21;
-const MAX_CARDS = 14;
+const MAX_CARDS = 15; // fits Club Nationals' 3 divisions × USAU_PER_DIVISION
 const PER_GAME_CAP = 1; // at most one standout per game so one blowout doesn't flood
 const PER_PLAYER_CAP = 1; // at most one card per player — their single best recent game
 /** PostgREST max-rows: one response never holds more, whatever .range asks. */
@@ -265,6 +268,7 @@ async function ufaStandouts(now: number): Promise<StandoutLine[]> {
     return {
       id: `ufa-${r.game_id}-${r.player_id}`,
       gameKey: `ufa-${r.game_id}`,
+      lane: 'ufa',
       league: 'ufa' as const,
       playerId: r.player_id,
       playerName: p?.full_name?.trim() || r.player_id,
@@ -464,6 +468,7 @@ async function ufaAwardSeasonCards(
     return {
       id: `ufa-season-${id}`,
       gameKey: `ufa-season-${id}`,
+      lane: 'ufa',
       league: 'ufa' as const,
       playerId: id,
       playerName: meta?.full_name?.trim() || id,
@@ -578,6 +583,7 @@ async function proStandouts(league: 'pul' | 'wul', now: number): Promise<Standou
     return {
       id: `${league}-${r.game_id}-${r.player_name}-${i}`,
       gameKey: `${league}-${r.game_id}`,
+      lane: league,
       league,
       playerId: null,
       playerName: r.player_name,
@@ -602,16 +608,18 @@ async function proStandouts(league: 'pul' | 'wul', now: number): Promise<Standou
 
 // ─── USAU (Club Nationals — event-level G/A totals) ─────────────────────────────
 
-const USAU_MAX_CARDS = 8;
-const USAU_MIN_GA = 3; // event totals build over the weekend; don't card a 1-goal line
+const USAU_PER_DIVISION = 5; // top 5 per division — Men, Mixed, Women (Hunter, 2026-10-28)
+const USAU_MIN_GAD = 3; // event totals build over the weekend; don't card a 1-goal line
 
 /**
- * Club Nationals standouts. USAU publishes only per-EVENT goal/assist totals
- * (usau_player_event_stats — no blocks/yards), and Nationals is the one club
- * event with national attention, so: cards show event totals for the top
- * scorers, appear while Nationals runs, and retire USAU_EVENT_GRACE_DAYS
- * after end_date. ts = now keeps them exempt from the age gate — the event
- * date-window here is the only on/off switch.
+ * Club Nationals standouts. USAU publishes per-EVENT totals only
+ * (usau_player_event_stats: goals, assists, Ds, turns — no yards), and
+ * Nationals is the one club event with national attention, so: cards show
+ * event totals for the top 5 performers in each division, ranked by the same
+ * perfScore as the pro leagues (Ds as blocks, +/- = G+A+D−T), appear while
+ * Nationals runs, and retire USAU_EVENT_GRACE_DAYS after end_date. ts = now
+ * keeps them exempt from the age gate — the event date-window here is the only
+ * on/off switch. Each division is its own lane in the rail's rotation.
  */
 async function usauStandouts(now: number): Promise<StandoutLine[]> {
   const db = supabase();
@@ -639,14 +647,18 @@ async function usauStandouts(now: number): Promise<StandoutLine[]> {
     team_id: string | null;
     goals: number | null;
     assists: number | null;
+    ds: number | null;
+    turns: number | null;
     usau_players: { display_name: string | null } | null;
-    usau_teams: { name: string } | null;
+    usau_teams: { name: string; gender_division: string | null } | null;
   };
   const stats: EventStat[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data: page } = await db
       .from('usau_player_event_stats')
-      .select('player_id, event_id, team_id, goals, assists, usau_players(display_name), usau_teams(name)')
+      .select(
+        'player_id, event_id, team_id, goals, assists, ds, turns, usau_players(display_name), usau_teams(name, gender_division)',
+      )
       .in('event_id', eventRows.map((e) => e.id))
       .order('player_id', { ascending: true })
       .order('event_id', { ascending: true })
@@ -659,50 +671,59 @@ async function usauStandouts(now: number): Promise<StandoutLine[]> {
   // Dedupe by (event, team, lowercased name) BEFORE ranking — the same human
   // can have two usau_players ids (one per team-season row), and without this
   // they'd win two separate cards for the same performance.
-  type Best = EventStat & { g: number; a: number; name: string };
+  type Best = EventStat & { name: string; division: string; perf: number };
   const byKey = new Map<string, Best>();
   for (const r of stats) {
     const name = r.usau_players?.display_name;
-    if (!name) continue; // no name to dedupe or display on — skip
-    const key = `${r.event_id}|${r.team_id ?? ''}|${name.toLowerCase()}`;
+    const division = r.usau_teams?.gender_division;
+    if (!name || !division) continue; // nothing to dedupe, display or lane on — skip
     const g = r.goals ?? 0;
     const a = r.assists ?? 0;
+    const d = r.ds ?? 0;
+    if (g + a + d < USAU_MIN_GAD) continue;
+    // Null turns = not tracked (older pages), so no +/- rather than a fake one.
+    const plusMinus = r.turns == null ? 0 : g + a + d - r.turns;
+    const perf = perfScore({ goals: g, assists: a, blocks: d, plusMinus, totalYards: null, completions: null, throwsAttempted: null });
+    const key = `${r.event_id}|${r.team_id ?? ''}|${name.toLowerCase()}`;
     const existing = byKey.get(key);
-    if (!existing || g + a > existing.g + existing.a) {
-      byKey.set(key, { ...r, g, a, name });
-    }
+    if (!existing || perf > existing.perf) byKey.set(key, { ...r, name, division, perf });
   }
 
-  const ranked = Array.from(byKey.values())
-    .filter((r) => r.g + r.a >= USAU_MIN_GA)
-    .sort((x, y) => y.g + y.a - (x.g + x.a))
-    .slice(0, USAU_MAX_CARDS);
-  if (ranked.length === 0) return [];
+  const byDivision = new Map<string, Best[]>();
+  for (const r of byKey.values()) byDivision.set(r.division, [...(byDivision.get(r.division) ?? []), r]);
+  const ranked = [...byDivision.values()].flatMap((rows) =>
+    rows.sort((x, y) => y.perf - x.perf).slice(0, USAU_PER_DIVISION),
+  );
 
-  return ranked.map((r) => ({
-    id: `usau-${r.event_id}-${r.player_id}`,
-    // Per-player key: these are event totals, so the per-game cap must not
-    // collapse the whole event into one card.
-    gameKey: `usau-${r.event_id}-${r.player_id}`,
-    league: 'usau' as const,
-    playerId: r.player_id,
-    playerName: r.name,
-    href: `/players/${r.player_id}?from=usau`,
-    headshotUrl: null,
-    teamName: r.usau_teams?.name ?? null,
-    dateLabel: 'Nationals',
-    opponent: null,
-    seasonMode: true, // event totals, not a single game line
-    stats: [
-      { label: 'G', value: String(r.g) },
-      { label: 'A', value: String(r.a) },
-      { label: 'G+A', value: String(r.g + r.a) },
-    ],
-    awardWatch: null,
-    callahan: false,
-    perf: perfScore({ goals: r.g, assists: r.a, blocks: 0, plusMinus: 0, totalYards: null, completions: null, throwsAttempted: null }),
-    ts: now,
-  }));
+  return ranked.map((r) => {
+    const stat = (label: string, v: number | null) => (v == null ? [] : [{ label, value: String(v) }]);
+    return {
+      id: `usau-${r.event_id}-${r.player_id}`,
+      // Per-player key: these are event totals, so the per-game cap must not
+      // collapse the whole event into one card.
+      gameKey: `usau-${r.event_id}-${r.player_id}`,
+      lane: `usau-${r.division}`,
+      league: 'usau' as const,
+      playerId: r.player_id,
+      playerName: r.name,
+      href: `/players/${r.player_id}?from=usau`,
+      headshotUrl: null,
+      teamName: r.usau_teams?.name ?? null,
+      dateLabel: `Nationals · ${r.division}`,
+      opponent: null,
+      seasonMode: true, // event totals, not a single game line
+      stats: [
+        { label: 'G', value: String(r.goals ?? 0) },
+        { label: 'A', value: String(r.assists ?? 0) },
+        ...stat('D', r.ds),
+        ...stat('T', r.turns),
+      ],
+      awardWatch: null,
+      callahan: false,
+      perf: r.perf,
+      ts: now,
+    };
+  });
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────────
@@ -733,7 +754,8 @@ function dateLabel(ts: number): string {
 /**
  * The standout stat-lines for the home carousel. Fans out to all wired leagues
  * (only ones with recent games contribute), applies the strength-gated recency
- * filter, caps to one line per game, and returns the top MAX_CARDS by perf.
+ * filter, caps to one line per game, and returns up to MAX_CARDS, rotating
+ * across leagues (and USAU divisions) so every active one shows.
  */
 export async function getStandoutPerformances(): Promise<StandoutLine[]> {
   const now = Date.now();
@@ -814,16 +836,30 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
     deduped.push(l);
   }
 
-  // Award cards LEAD the carousel (in award precedence MVP → OPOY → DPOY), then
-  // callahan lines, then ordinary standouts by perf. Award cards are exempt from
-  // the MAX_CARDS slice so they're always present regardless of a quiet week.
+  // Award cards LEAD the carousel (in award precedence MVP → OPOY → DPOY) and
+  // are exempt from the MAX_CARDS budget so they're always present regardless
+  // of a quiet week.
   const AWARD_ORDER: Record<AwardWatch, number> = { MVP: 0, OPOY: 1, DPOY: 2, ROY: 3 };
   const awards = deduped
     .filter((l) => l.awardWatch)
     .sort((a, b) => AWARD_ORDER[a.awardWatch!] - AWARD_ORDER[b.awardWatch!]);
-  const rest = deduped
-    .filter((l) => !l.awardWatch)
-    .sort((a, b) => (b.callahan ? 1 : 0) - (a.callahan ? 1 : 0) || b.perf - a.perf)
-    .slice(0, Math.max(0, MAX_CARDS - awards.length));
+
+  // Everything else shares the rail by lane (UFA, PUL, WUL, each USAU Nationals
+  // division): lanes take turns, each adding its next-best line (callahans
+  // first, then perf), until the budget runs out. A single perf sort let one
+  // league crowd out the rest — PUL has no yards, so its lines always sank to
+  // the back (Hunter, 2026-10-28: show every league when seasons overlap).
+  const rank = (a: StandoutLine, b: StandoutLine) =>
+    (b.callahan ? 1 : 0) - (a.callahan ? 1 : 0) || b.perf - a.perf;
+  const byLane = new Map<string, StandoutLine[]>();
+  for (const l of deduped) {
+    if (!l.awardWatch) byLane.set(l.lane, [...(byLane.get(l.lane) ?? []), l]);
+  }
+  const lanes = [...byLane.values()].map((ls) => ls.sort(rank)).sort((a, b) => rank(a[0], b[0]));
+  const budget = Math.max(0, MAX_CARDS - awards.length);
+  const rest: StandoutLine[] = [];
+  for (let i = 0; rest.length < budget && lanes.some((ls) => i < ls.length); i++) {
+    for (const ls of lanes) if (i < ls.length && rest.length < budget) rest.push(ls[i]);
+  }
   return [...awards, ...rest];
 }

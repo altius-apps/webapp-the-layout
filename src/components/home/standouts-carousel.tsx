@@ -6,7 +6,7 @@
 // hover/focus, and respects prefers-reduced-motion. Shows ~1.2 cards on mobile
 // up to ~4 on wide screens; arrows (desktop) + dots for manual control.
 //
-// UFA lines carry a headshot; PUL/WUL fall back to an initials monogram. Each
+// UFA lines carry a headshot; cards without one show no portrait at all. Each
 // card links to the player's profile when we could resolve an id.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -167,16 +167,13 @@ function StandoutCard({ line, showLeague }: { line: StandoutLine; showLeague: bo
     <>
       {/* Faint accent wash + header: portrait, name, league/date */}
       <div className="relative flex items-start gap-3.5 px-5 pt-5 pb-4">
-        <span className="shrink-0 w-14 h-14 rounded-full overflow-hidden bg-ink/5 flex items-center justify-center ring-1 ring-hairline">
-          {line.headshotUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
+        {/* Portrait only when we have a headshot — no placeholder circle. */}
+        {line.headshotUrl && (
+          <span className="shrink-0 w-14 h-14 rounded-full overflow-hidden bg-ink/5 ring-1 ring-hairline">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={line.headshotUrl} alt={line.playerName} className="w-full h-full object-cover" loading="lazy" />
-          ) : (
-            <span className="font-display italic font-bold text-[18px] text-muted" aria-hidden="true">
-              {initials(line.playerName)}
-            </span>
-          )}
-        </span>
+          </span>
+        )}
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 flex-wrap">
             {showLeague && (
@@ -301,11 +298,4 @@ function RailArrow({ side, onClick }: { side: 'left' | 'right'; onClick: () => v
       </svg>
     </button>
   );
-}
-
-function initials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
 }
