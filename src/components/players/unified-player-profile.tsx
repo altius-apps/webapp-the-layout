@@ -407,6 +407,9 @@ function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
 function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number }) {
   const totalGoals = stint.events.reduce((s, e) => s + (e.goals ?? 0), 0);
   const totalAssists = stint.events.reduce((s, e) => s + (e.assists ?? 0), 0);
+  // Ds only exist on events scraped since 2026-10-28; older seasons skip the cell.
+  const hasDs = stint.events.some((e) => e.ds != null);
+  const totalDs = stint.events.reduce((s, e) => s + (e.ds ?? 0), 0);
   const hasStats = stint.events.some((e) => e.hasStats);
 
   return (
@@ -442,6 +445,7 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
               { label: 'EVTS', value: stint.events.length },
               { label: 'G', value: totalGoals },
               { label: 'A', value: totalAssists },
+              ...(hasDs ? [{ label: 'D', value: totalDs }] : []),
             ]}
           />
         ) : (
@@ -508,6 +512,13 @@ function UsauEventRow({
         <span className="flex items-center gap-2 flex-shrink-0">
           <span className="tabular text-[12px] font-bold text-ink font-tight">{event.goals ?? 0}G</span>
           <span className="tabular text-[12px] font-bold text-ink font-tight">{event.assists ?? 0}A</span>
+          {/* Ds / turns only on events scraped since 2026-10-28. */}
+          {event.ds != null && (
+            <span className="tabular text-[12px] font-bold text-ink font-tight">{event.ds}D</span>
+          )}
+          {event.turns != null && (
+            <span className="tabular text-[12px] font-bold text-muted font-tight">{event.turns}T</span>
+          )}
         </span>
       ) : (
         // No stats row for this player here (untracked event, or tracked with

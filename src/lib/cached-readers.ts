@@ -19,6 +19,7 @@ import { unstable_cache } from 'next/cache';
 import {
   recentUsauTournamentPage as _recentUsauTournamentPage,
   listOfficialUsauRankings as _listOfficialUsauRankings,
+  listUsauClubStandings as _listUsauClubStandings,
   listUsauPlayers as _listUsauPlayers,
   listSeasons as _listSeasons,
   listSeriesStageEvents as _listSeriesStageEvents,
@@ -96,6 +97,12 @@ export const listUsauSeasonsCached = unstable_cache(
 export const listOfficialUsauRankingsCached = unstable_cache(
   _listOfficialUsauRankings,
   ['usau-official-rankings'],
+  { revalidate: REVALIDATE_SECONDS },
+);
+
+export const listUsauClubStandingsCached = unstable_cache(
+  _listUsauClubStandings,
+  ['usau-club-standings'],
   { revalidate: REVALIDATE_SECONDS },
 );
 

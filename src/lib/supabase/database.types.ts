@@ -3485,27 +3485,33 @@ export type Database = {
       usau_player_event_stats: {
         Row: {
           assists: number | null
+          ds: number | null
           event_id: string
           goals: number | null
           player_id: string
           scraped_at: string
           team_id: string | null
+          turns: number | null
         }
         Insert: {
           assists?: number | null
+          ds?: number | null
           event_id: string
           goals?: number | null
           player_id: string
           scraped_at?: string
           team_id?: string | null
+          turns?: number | null
         }
         Update: {
           assists?: number | null
+          ds?: number | null
           event_id?: string
           goals?: number | null
           player_id?: string
           scraped_at?: string
           team_id?: string | null
+          turns?: number | null
         }
         Relationships: [
           {
@@ -5277,6 +5283,10 @@ export type Database = {
           points: number
           team_name: string
         }[]
+      }
+      list_usau_club_standings: {
+        Args: { p_division: string; p_limit?: number }
+        Returns: Json
       }
       list_usau_players: {
         Args: {

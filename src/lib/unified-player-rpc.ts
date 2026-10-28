@@ -118,6 +118,8 @@ interface RpcUsauEvent {
   startDate?: string | null;
   goals?: number | null;
   assists?: number | null;
+  ds?: number | null;
+  turns?: number | null;
   seed?: number | null;
   pool?: string | null;
 }
@@ -342,6 +344,8 @@ function usauEventsArePresentable(usauStints: RpcUsauStint[]): boolean {
 function mapUsauEvent(ev: RpcUsauEvent): UsauSeasonStint['events'][number] {
   const goals = ev.goals ?? null;
   const assists = ev.assists ?? null;
+  const ds = ev.ds ?? null;
+  const turns = ev.turns ?? null;
   return {
     slug: str(ev.slug),
     name: str(ev.name),
@@ -349,9 +353,11 @@ function mapUsauEvent(ev: RpcUsauEvent): UsauSeasonStint['events'][number] {
     startDate: ev.startDate ?? null,
     goals,
     assists,
+    ds,
+    turns,
     seed: ev.seed ?? null,
     pool: ev.pool ?? null,
-    hasStats: goals != null || assists != null,
+    hasStats: goals != null || assists != null || ds != null || turns != null,
   };
 }
 

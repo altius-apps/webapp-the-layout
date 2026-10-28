@@ -7,10 +7,12 @@
 
 import Link from 'next/link';
 import {
+  clubStandingFinish,
   listRankedTeams,
   officialRankSetFor,
+  type ClubStandings,
 } from '@/lib/usau/data';
-import { listOfficialUsauRankingsCached } from '@/lib/cached-readers';
+import { listOfficialUsauRankingsCached, listUsauClubStandingsCached } from '@/lib/cached-readers';
 import type { UsauLevel } from '@/lib/league';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
@@ -21,6 +23,15 @@ export async function UsauTeamsRanked({
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   competitionLevel?: UsauLevel;
 }) {
+  // After Club Nationals, Club ranks by how teams finished (Nationals, then
+  // Regionals / Sectionals) until next season's first poll lands.
+  if (competitionLevel === 'CLUB' && genderDivision) {
+    const standings = await listUsauClubStandingsCached(genderDivision, 500);
+    if (standings && standings.teams.length > 0) {
+      return <ClubFinalStandings data={standings} genderDivision={genderDivision} />;
+    }
+  }
+
   // Prefer USAU's OFFICIAL published rankings when we have them scraped for
   // this division (Club Men/Women/Mixed, College-D1 Men/Women). This is the
   // same source the home-page "Top of the division" reads, so the two match.
@@ -180,6 +191,52 @@ function OfficialRankings({
   );
 }
 
+function ClubFinalStandings({
+  data,
+  genderDivision,
+}: {
+  data: ClubStandings;
+  genderDivision: 'Men' | 'Women' | 'Mixed';
+}) {
+  return (
+    <div className="flex flex-col gap-7">
+      <div className="text-[11px] font-medium text-faint font-tight bg-surface rounded-card-sm shadow-soft px-4 py-3">
+        <span className="font-bold text-muted uppercase tracking-[0.16em] text-[10px]">
+          How it&rsquo;s ranked ·
+        </span>{' '}
+        Nationals finish first, then teams out at Regionals and Sectionals by how
+        close they came to a bid. USAU&rsquo;s final rating breaks ties.
+      </div>
+
+      <section aria-labelledby="final-standings-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
+        <h2
+          id="final-standings-heading"
+          className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+        >
+          <span>{data.season} Final standings</span>
+          <span className="text-faint normal-case tracking-[0.1em]">{data.teams.length} teams</span>
+        </h2>
+        <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
+          {data.teams.map((t) => (
+            <RankedRow
+              key={t.rank}
+              rank={t.rank}
+              name={t.name}
+              genderDivision={genderDivision}
+              state={t.state}
+              competitionLevel="CLUB"
+              href={t.id ? `/usau/teams/${t.id}` : null}
+              isTop
+              finish={clubStandingFinish(t)}
+              rating={t.rating}
+            />
+          ))}
+        </ol>
+      </section>
+    </div>
+  );
+}
+
 function RankedRow({
   rank,
   name,
@@ -189,6 +246,7 @@ function RankedRow({
   href,
   isTop,
   record = null,
+  finish = null,
   rating = null,
 }: {
   rank: number | null;
@@ -202,6 +260,8 @@ function RankedRow({
   isTop: boolean;
   /** Optional W–L record (official rankings only). */
   record?: string | null;
+  /** Optional season finish, e.g. "T-9 · Nationals" (final standings only). */
+  finish?: string | null;
   /** Optional USAU power rating (official rankings only). */
   rating?: number | null;
 }) {
@@ -236,7 +296,7 @@ function RankedRow({
           {name}
         </span>
         <span className="block text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mt-0.5">
-          {[record, state, competitionLevel?.replace('_', ' ')].filter(Boolean).join(' · ') || '—'}
+          {[finish ?? record, state, competitionLevel?.replace('_', ' ')].filter(Boolean).join(' · ') || '—'}
         </span>
       </span>
       {rating != null && (

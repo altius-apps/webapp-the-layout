@@ -20,6 +20,7 @@ import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
 import { usauToday } from '@/lib/today';
 import { gameWinnerId } from '@/lib/usau/game-winner';
+import { ordinal } from '@/lib/bracket-tree';
 import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { seriesStageHref, seriesUnitLabel, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 import {
@@ -3367,10 +3368,14 @@ export interface UsauPlayerSummary {
       startDate: string | null;
       goals: number | null;
       assists: number | null;
+      /** Ds / turns — null on rows scraped before USAU stats moved to the
+       *  roster table (2026-10-28), so older events show "—" for these. */
+      ds: number | null;
+      turns: number | null;
       seed: number | null;
       pool: string | null;
       /** True when USAU published a stats row for this event (a player only
-       *  gets one if they had ≥1 G or A) — lets the UI show 0 (tracked, no
+       *  gets one if they had any stat) — lets the UI show 0 (tracked, no
        *  score) instead of "—" (USAU never publishes stats here at all). */
       hasStats: boolean;
     }>;
@@ -3715,7 +3720,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // Stats only need this cluster's player ids.
   const { data: statsData } = await db
     .from('usau_player_event_stats')
-    .select('player_id, event_id, team_id, goals, assists')
+    .select('player_id, event_id, team_id, goals, assists, ds, turns')
     .in('player_id', playerIds);
   const rosterRes = { data: clusterRosters };
   const statsRes = { data: statsData };
@@ -3788,12 +3793,17 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     if (!eventsByTeamId.has(row.team_id)) eventsByTeamId.set(row.team_id, []);
     eventsByTeamId.get(row.team_id)!.push(row);
   }
-  const statsByEvent = new Map<string, { goals: number; assists: number }>();
+  // Ds/turns stay null unless some row carries them (SQL sum() semantics, same
+  // as _build_player_profile), so pre-2026-10-28 rows read "—", not 0.
+  const addNullable = (a: number | null, b: number | null) => (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
+  const statsByEvent = new Map<string, { goals: number; assists: number; ds: number | null; turns: number | null }>();
   for (const s of statsRes.data ?? []) {
-    const prev = statsByEvent.get(s.event_id) ?? { goals: 0, assists: 0 };
+    const prev = statsByEvent.get(s.event_id) ?? { goals: 0, assists: 0, ds: null, turns: null };
     statsByEvent.set(s.event_id, {
       goals: prev.goals + (s.goals ?? 0),
       assists: prev.assists + (s.assists ?? 0),
+      ds: addNullable(prev.ds, s.ds),
+      turns: addNullable(prev.turns, s.turns),
     });
   }
 
@@ -3861,6 +3871,8 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
         startDate: ev.start_date,
         goals: stats?.goals ?? null,
         assists: stats?.assists ?? null,
+        ds: stats?.ds ?? null,
+        turns: stats?.turns ?? null,
         seed: p.seed,
         pool: p.pool,
         hasStats: stats != null,
@@ -3965,8 +3977,22 @@ export interface UsauTeamSummary {
       playerId: string;
       name: string;
       jerseyNumber: string | null;
+      /** This player's line at that season's Nationals; null when the team
+       *  didn't go or USAU published nothing for them. ds/turns are null on
+       *  rows scraped before 2026-10-28. */
+      nationals: UsauNationalsStatLine | null;
     }>;
+    /** The Nationals this team played that season, if any — heads the
+     *  roster's stat columns. */
+    nationalsEvent: { slug: string; name: string } | null;
   }>;
+}
+
+export interface UsauNationalsStatLine {
+  goals: number;
+  assists: number;
+  ds: number | null;
+  turns: number | null;
 }
 
 export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
@@ -4039,6 +4065,44 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
     if (rows.length < PAGE) break;
   }
 
+  // Nationals per season, from the team's own participations, then every
+  // player's line there — one bounded read (~25 rows per Nationals played).
+  const nationalsBySeason = new Map<number, { id: string; slug: string; name: string }>();
+  for (const p of (partRes.data ?? []) as unknown as PartRow[]) {
+    const ev = p.usau_events;
+    if (ev && isNationalsChampionshipName(ev.name)) {
+      nationalsBySeason.set(ev.season, { id: p.event_id, slug: ev.usau_slug, name: ev.name });
+    }
+  }
+  // Keyed `${season}|${lowercased name}` to match the roster dedupe below.
+  const nationalsStats = new Map<string, UsauNationalsStatLine>();
+  if (nationalsBySeason.size > 0) {
+    const seasonByEvent = new Map([...nationalsBySeason].map(([season, e]) => [e.id, season]));
+    const { data: statRows, error: statErr } = await db
+      .from('usau_player_event_stats')
+      .select('event_id, goals, assists, ds, turns, usau_players(display_name)')
+      .in('event_id', [...seasonByEvent.keys()])
+      .in('team_id', teamIds);
+    if (statErr) throw statErr;
+    for (const s of (statRows ?? []) as unknown as Array<{
+      event_id: string;
+      goals: number | null;
+      assists: number | null;
+      ds: number | null;
+      turns: number | null;
+      usau_players: { display_name: string } | null;
+    }>) {
+      const name = s.usau_players?.display_name;
+      if (!name) continue;
+      const line = { goals: s.goals ?? 0, assists: s.assists ?? 0, ds: s.ds, turns: s.turns };
+      const key = `${seasonByEvent.get(s.event_id)}|${name.toLowerCase()}`;
+      // Same name under two player ids: keep the fuller line, never sum.
+      const total = (l: UsauNationalsStatLine) => l.goals + l.assists + (l.ds ?? 0) + (l.turns ?? 0);
+      const prev = nationalsStats.get(key);
+      if (!prev || total(line) > total(prev)) nationalsStats.set(key, line);
+    }
+  }
+
   // Group by season.
   const eventsBySeason = new Map<number, UsauTeamSummary['seasons'][number]['events']>();
   const seenEventBySeason = new Map<number, Set<string>>();
@@ -4100,6 +4164,7 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
         playerId: r.player_id,
         name: player.display_name,
         jerseyNumber: jersey,
+        nationals: nationalsStats.get(`${r.season}|${key}`) ?? null,
       });
     }
   }
@@ -4121,7 +4186,8 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
         if (!isNaN(ja) && !isNaN(jb) && ja !== jb) return ja - jb;
         return a.name.localeCompare(b.name);
       });
-      return { season, events, roster };
+      const nat = nationalsBySeason.get(season);
+      return { season, events, roster, nationalsEvent: nat ? { slug: nat.slug, name: nat.name } : null };
     });
 
   return {
@@ -5447,6 +5513,56 @@ export async function listOfficialUsauRankings(
     scrapedAt: rows[0]?.scraped_at ?? null,
     teams,
   };
+}
+
+// ─── Club season-final standings ─────────────────────────────────────────
+// Once a season's Club Nationals is fully placed, Club ranks by finish instead
+// of the (pre-Nationals) poll: Nationals, then teams out at Regionals, then
+// Sectionals — each by places short of a bid, rating breaking ties — then poll
+// teams with no Series result. Precomputed hourly in usau_club_standings_cache;
+// the RPC returns null while the poll should show (before Nationals finishes,
+// or once next season's poll lands). Mobile calls the same RPC.
+
+export interface ClubStandingTeam {
+  rank: number;
+  /** usau_teams.id; null for a poll-only team never matched to a team row. */
+  id: string | null;
+  name: string;
+  state: string | null;
+  /** 1 Nationals · 2 out at Regionals · 3 out at Sectionals · 4 poll only. */
+  tier: 1 | 2 | 3 | 4;
+  /** Finish at that stage; null when the bracket didn't yield a placement. */
+  place: number | null;
+  tied: boolean;
+  /** 'Nationals', 'Northwest Regionals', 'Metro New York Sectionals'; null for tier 4. */
+  eventLabel: string | null;
+  rating: number | null;
+  wins: number | null;
+  losses: number | null;
+}
+
+export interface ClubStandings {
+  season: number;
+  builtAt: string;
+  teams: ClubStandingTeam[];
+}
+
+export async function listUsauClubStandings(
+  division: 'Men' | 'Women' | 'Mixed',
+  limit = 500,
+): Promise<ClubStandings | null> {
+  const db = await supabase();
+  const { data, error } = await db.rpc('list_usau_club_standings', { p_division: division, p_limit: limit });
+  if (error) throw error;
+  return (data ?? null) as unknown as ClubStandings | null;
+}
+
+/** "T-9 · Nationals", "4th · Northwest Regionals", "Northwest Regionals"
+ *  (no placement), or "No Series result". */
+export function clubStandingFinish(t: ClubStandingTeam): string {
+  if (!t.eventLabel) return 'No Series result';
+  if (t.place == null) return t.eventLabel;
+  return `${t.tied ? `T-${t.place}` : ordinal(t.place)} · ${t.eventLabel}`;
 }
 
 export interface RankedTeam {

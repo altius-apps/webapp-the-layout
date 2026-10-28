@@ -1,14 +1,14 @@
 // sync-event-rosters: scrape per-team rosters + per-event player stats
-// (goals/assists) for one event.
+// (goals/assists/Ds/turns) for one event.
 //
 // Request body: { slug: string }
 //
 // For each team already in usau_event_teams for that event, hit
-// /teams/events/Eventteam/?EventTeamId={id} and parse:
-//   - The roster table (#CT_Main_0_ucTeamDetails_gvList) → usau_players +
-//     usau_rosters
-//   - The goals leaderboard (#CT_Right_1_gvListGoals) → usau_player_event_stats
-//   - The assists leaderboard (#CT_Right_1_gvListAssists) → same
+// /teams/events/Eventteam/?EventTeamId={id} and parse the roster table
+// (#CT_Main_0_ucTeamDetails_gvList) → usau_players + usau_rosters, and its
+// Points (= goals) / Assists / Ds / Turns columns → usau_player_event_stats.
+// (Stats used to come from #CT_Right_1_gvListGoals/Assists leaderboards; USAU
+// removed those in Oct 2026 and the scrape silently stored nothing.)
 //
 // Player identity: USAU doesn't expose a persistent player ID on team
 // pages, just display names. We use (team_id, lower(name)) as the natural
@@ -30,22 +30,31 @@ import { fetchHtml } from '../_shared/http.ts';
 import { parseHtml, teamUrlByEventTeamId } from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 
+/** Null = USAU left that column blank for the whole team (not tracked for
+ *  the event — e.g. no Ds/Turns before ~2016), as opposed to a 0. */
+interface PlayerStats {
+  goals: number | null;
+  assists: number | null;
+  ds: number | null;
+  turns: number | null;
+}
+
 interface RosterPlayer {
   jersey: string | null;
   name: string;
   pronouns: string | null;
   height: string | null;
-}
-
-interface StatLine {
-  name: string;
-  value: number | null;
+  /** Null when all four stat cells are blank (didn't play, or stats not
+   *  entered) — no stats row is written for them. */
+  stats: PlayerStats | null;
 }
 
 interface TeamPageParse {
   roster: RosterPlayer[];
-  goals: StatLine[];
-  assists: StatLine[];
+  /** False unless all four stat headers are present exactly once — USAU
+   *  changed the page again; no stats are written and it's logged, so it can't
+   *  go silent like the leaderboard removal. */
+  statColumnsFound: boolean;
 }
 
 function stringifyErr(err: unknown): string {
@@ -65,9 +74,31 @@ function parseTeamPage(html: string): TeamPageParse {
   const $ = parseHtml(html);
 
   // Roster: #CT_Main_0_ucTeamDetails_gvList tr
-  // Columns: jersey, name, pronouns, ?, height, points
+  // Columns: No., Player, Pronouns, Position, Height, Points, Assists, Ds, Turns.
+  // Stat columns are located by header text (own text nodes only — the
+  // Pronouns <th> nests a tooltip whose text would pollute .text()).
+  const $table = $('#CT_Main_0_ucTeamDetails_gvList');
+  const HEADER_STAT: Record<string, keyof PlayerStats> = { points: 'goals', assists: 'assists', ds: 'ds', turns: 'turns' };
+  const statCol: Partial<Record<keyof PlayerStats, number>> = {};
+  const $headers = $table.find('tr').first().children('th');
+  let duplicateHeader = false;
+  $headers.each((i, th) => {
+    const label = $(th).contents().filter((_, n) => n.type === 'text').text().trim().toLowerCase();
+    const key = HEADER_STAT[label];
+    if (!key) return;
+    if (statCol[key] != null) duplicateHeader = true;
+    statCol[key] = i;
+  });
+  // All four, each once, and no spanning headers — otherwise a renamed or
+  // shifted column would write a fabricated 0 over a real stat. No stats then.
+  const statColumnsFound =
+    Object.keys(statCol).length === 4 && !duplicateHeader && $headers.filter('[colspan]').length === 0;
+  const headerCount = $headers.length;
+
+  const STAT_KEYS = ['goals', 'assists', 'ds', 'turns'] as const;
   const roster: RosterPlayer[] = [];
-  $('#CT_Main_0_ucTeamDetails_gvList tr').each((_, tr) => {
+  const rawByPlayer: Array<Record<keyof PlayerStats, number | null> | null> = [];
+  $table.find('tr').each((_, tr) => {
     const $tr = $(tr);
     const $cells = $tr.children('td');
     if ($cells.length === 0) return;
@@ -77,29 +108,39 @@ function parseTeamPage(html: string): TeamPageParse {
     if (!name) return;
     const pronouns = $cells.eq(2).text().trim() || null;
     const height = $cells.eq(4).text().trim() || null;
-    roster.push({ jersey, name, pronouns, height });
+
+    // A row misaligned with the header, or holding an implausible value, or
+    // with all four cells blank, gets no stats.
+    const cell = (k: keyof PlayerStats): number | null | 'bad' => {
+      const text = $cells.eq(statCol[k]!).text().trim();
+      if (text === '') return null;
+      const m = text.match(/^(\d{1,3})$/);
+      return m ? parseInt(m[1], 10) : 'bad';
+    };
+    let raw: Record<keyof PlayerStats, number | null> | null = null;
+    if (statColumnsFound && $cells.length === headerCount) {
+      const vals = STAT_KEYS.map(cell);
+      if (!vals.includes('bad') && vals.some((v) => v != null)) {
+        raw = Object.fromEntries(STAT_KEYS.map((k, i) => [k, vals[i] as number | null])) as Record<keyof PlayerStats, number | null>;
+      }
+    }
+    rawByPlayer.push(raw);
+    roster.push({ jersey, name, pronouns, height, stats: null });
   });
 
-  const parseStatTable = (selector: string): StatLine[] => {
-    const out: StatLine[] = [];
-    $(`${selector} tr`).each((_, tr) => {
-      const $tr = $(tr);
-      const $cells = $tr.children('td');
-      if ($cells.length === 0) return;
-      const name = $cells.eq(0).text().trim();
-      if (!name) return;
-      const raw = $cells.eq(1).text().trim();
-      const num = raw.match(/^(\d+)$/);
-      out.push({ name, value: num ? parseInt(num[1], 10) : null });
-    });
-    return out;
-  };
+  // USAU renders a zero as a blank cell, so a blank is 0 — unless the column
+  // is blank for the whole team, which means it wasn't tracked: null.
+  const tracked = new Set(STAT_KEYS.filter((k) => rawByPlayer.some((r) => r?.[k] != null)));
+  roster.forEach((p, i) => {
+    const r = rawByPlayer[i];
+    if (r) {
+      p.stats = Object.fromEntries(
+        STAT_KEYS.map((k) => [k, tracked.has(k) ? r[k] ?? 0 : null]),
+      ) as unknown as PlayerStats;
+    }
+  });
 
-  return {
-    roster,
-    goals: parseStatTable('#CT_Right_1_gvListGoals'),
-    assists: parseStatTable('#CT_Right_1_gvListAssists'),
-  };
+  return { roster, statColumnsFound };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -109,8 +150,8 @@ function parseTeamPage(html: string): TeamPageParse {
 interface SyncResult {
   team: string;
   rosterSize: number;
-  withGoals: number;
-  withAssists: number;
+  withStats: number;
+  statColumnsFound?: boolean;
   skipped?: boolean;
   error?: string;
 }
@@ -147,36 +188,25 @@ async function syncTeam(
     return {
       team: teamName,
       rosterSize: 0,
-      withGoals: 0,
-      withAssists: 0,
+      withStats: 0,
       skipped: true,
       error: stringifyErr(err),
     };
   }
 
-  const { roster, goals, assists } = parseTeamPage(html);
+  const { roster, statColumnsFound } = parseTeamPage(html);
   if (roster.length === 0) {
     // Page fetched fine, USAU just publishes no roster for it. Stamp it so the
     // backfill stops re-scraping a page that will never yield rows. Only on
     // this path — a fetch failure above must stay unstamped so it retries.
     await markRosterChecked(db, eventID, teamUUID);
-    return { team: teamName, rosterSize: 0, withGoals: 0, withAssists: 0, skipped: true };
+    return { team: teamName, rosterSize: 0, withStats: 0, skipped: true };
+  }
+  if (!statColumnsFound) {
+    console.error(`[sync-event-rosters] ${teamName}: roster table lacks exactly one each of Points/Assists/Ds/Turns headers — USAU page changed? No stats written.`);
   }
 
-  // Merge goals + assists by lowercased name so we can join them to
-  // roster players.
-  const statsByName = new Map<string, { goals: number | null; assists: number | null }>();
-  for (const g of goals) {
-    statsByName.set(g.name.toLowerCase(), { goals: g.value, assists: null });
-  }
-  for (const a of assists) {
-    const existing = statsByName.get(a.name.toLowerCase()) ?? { goals: null, assists: null };
-    existing.assists = a.value;
-    statsByName.set(a.name.toLowerCase(), existing);
-  }
-
-  let withGoals = 0;
-  let withAssists = 0;
+  let withStats = 0;
 
   // Existing roster on this team this season — used to dedupe by name. One name
   // can carry several player_ids here (legacy season rows, merged team rows, a
@@ -243,17 +273,17 @@ async function syncTeam(
     );
     if (rosterErr) throw new Error(`usau_rosters upsert: ${stringifyErr(rosterErr)}`);
 
-    const stats = statsByName.get(lowerName);
-    if (stats && (stats.goals != null || stats.assists != null)) {
-      if (stats.goals != null) withGoals++;
-      if (stats.assists != null) withAssists++;
+    if (p.stats) {
+      withStats++;
       const { error: statErr } = await db.from('usau_player_event_stats').upsert(
         {
           player_id: playerUUID,
           event_id: eventID,
           team_id: teamUUID,
-          goals: stats.goals,
-          assists: stats.assists,
+          goals: p.stats.goals,
+          assists: p.stats.assists,
+          ds: p.stats.ds,
+          turns: p.stats.turns,
           scraped_at: new Date().toISOString(),
         },
         { onConflict: 'player_id,event_id', ignoreDuplicates: false },
@@ -268,7 +298,7 @@ async function syncTeam(
     .eq('id', teamUUID);
   await markRosterChecked(db, eventID, teamUUID);
 
-  return { team: teamName, rosterSize: roster.length, withGoals, withAssists };
+  return { team: teamName, rosterSize: roster.length, withStats, statColumnsFound };
 }
 
 // ────────────────────────────────────────────────────────────
@@ -367,18 +397,17 @@ async function run(body: RequestBody) {
   }
 
   const totalRoster = results.reduce((s, r) => s + r.rosterSize, 0);
-  const totalGoals = results.reduce((s, r) => s + r.withGoals, 0);
-  const totalAssists = results.reduce((s, r) => s + r.withAssists, 0);
+  const totalStats = results.reduce((s, r) => s + r.withStats, 0);
 
   return {
-    rowsProcessed: totalRoster + totalGoals + totalAssists,
+    rowsProcessed: totalRoster + totalStats,
     result: {
       slug,
       teams: results.length,
       players: totalRoster,
       /** Non-zero when this run had to resolve URL ids before it could scrape. */
       resolvedUrlIds: resolved,
-      stats: { goals: totalGoals, assists: totalAssists },
+      withStats: totalStats,
       perTeam: results,
     },
   };

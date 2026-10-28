@@ -52,6 +52,10 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
         })}
       </div>
 
+      {active.caption && (
+        <span className="font-mono text-[10.5px] text-faint tracking-[0.06em] mb-3">{active.caption}</span>
+      )}
+
       {/* Top-16 grid for the active division — 4 across on desktop so it
           reads as a companion block to the UFA division cards above. */}
       <div
@@ -64,7 +68,9 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
           <span className="font-mono text-[11px] text-faint py-4 col-span-full">No rankings available.</span>
         ) : (
           active.teams.map((team) => {
-            const record = team.wins != null && team.losses != null ? `${team.wins}-${team.losses}` : null;
+            // Final standings show the season finish where the poll shows W-L.
+            const record =
+              team.finish ?? (team.wins != null && team.losses != null ? `${team.wins}-${team.losses}` : null);
             const rating = team.rating != null ? team.rating.toFixed(0) : null;
 
             // Ranked teams we couldn't match to a usau_teams row (team.id null)
@@ -96,7 +102,7 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
                     {rating && (
                       <span className="font-display italic font-bold text-[14px] text-ink tabular">{rating}</span>
                     )}
-                    {record && <span className="font-mono text-[10.5px] text-muted tabular">{record}</span>}
+                    {record && <span className="font-mono text-[10.5px] text-muted tabular truncate min-w-0">{record}</span>}
                   </div>
                 )}
               </>

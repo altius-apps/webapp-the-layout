@@ -8,7 +8,7 @@
 import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import type { UsauTeamSummary } from '@/lib/usau/data';
+import type { UsauNationalsStatLine, UsauTeamSummary } from '@/lib/usau/data';
 import { usauEventHref } from '@/lib/usau/event-href';
 import { PillSelect } from '@/components/pill-select';
 
@@ -55,6 +55,8 @@ function SeasonHistory({
   }
 
   const active = seasons.find((s) => s.season === selected) ?? seasons[0];
+  // Stat columns only when the team went to Nationals and USAU published lines.
+  const showNationals = active.nationalsEvent != null && active.roster.some((p) => p.nationals != null);
 
   return (
     <section aria-labelledby="history-heading">
@@ -100,8 +102,15 @@ function SeasonHistory({
 
         {active.roster.length > 0 && (
           <div className="bg-surface rounded-card-lg shadow-card p-4 lg:p-5">
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-2 px-1">
-              Roster
+            <div className="flex items-baseline justify-between gap-3 mb-2 px-1">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                Roster
+              </span>
+              {showNationals && (
+                <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight truncate">
+                  Nationals · G · A · D · T
+                </span>
+              )}
             </div>
             <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {active.roster.map((p) => (
@@ -119,6 +128,7 @@ function SeasonHistory({
                     <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
                       {p.name}
                     </span>
+                    {showNationals && <NationalsStatCells line={p.nationals} />}
                   </Link>
                 </li>
               ))}
@@ -133,6 +143,37 @@ function SeasonHistory({
         )}
       </div>
     </section>
+  );
+}
+
+/** G · A · D · T at that season's Nationals, fixed-width so columns align down
+ *  the roster. "–" where the player has no line (or, for D/T, a line scraped
+ *  before USAU stats moved to the roster table). */
+function NationalsStatCells({ line }: { line: UsauNationalsStatLine | null }) {
+  const cells: Array<[string, number | null]> = [
+    ['goals', line?.goals ?? null],
+    ['assists', line?.assists ?? null],
+    ['Ds', line?.ds ?? null],
+    ['turns', line?.turns ?? null],
+  ];
+  return (
+    <span
+      className="flex items-center flex-shrink-0"
+      aria-label={line ? cells.map(([k, v]) => `${v ?? 'no'} ${k}`).join(', ') : 'No Nationals stats'}
+    >
+      {cells.map(([k, v]) => (
+        <span
+          key={k}
+          aria-hidden="true"
+          className={[
+            'tabular text-[12px] font-bold font-tight w-6 text-right',
+            v == null ? 'text-faint' : k === 'turns' ? 'text-muted' : 'text-ink',
+          ].join(' ')}
+        >
+          {v ?? '–'}
+        </span>
+      ))}
+    </span>
   );
 }
 
