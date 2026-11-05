@@ -3217,13 +3217,15 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   type PlayerRow = { id: string; display_name: string };
   type EventRow = { slug: string; name: string; season: number; start_date: string | null; end_date: string | null; division: string | null; score: number };
 
-  // ── Dedupe teams by (lower(name), competition_level) ─────────────────
+  // ── Dedupe teams by (lower(name), gender_division, competition_level) ─
   // RPC returns rows already ranked by score; first occurrence wins.
   const teamMap = new Map<string, SearchResult>();
   for (const t of (teamRes.data ?? []) as TeamRow[]) {
-    const key = `${t.name.toLowerCase()}${t.competition_level ?? ''}`;
+    // Gender is part of the identity — without it Men's + Women's "Colorado"
+    // collapsed into one arbitrary row (same identity getTeam clusters on).
+    const key = `${t.name.toLowerCase()}|${t.gender_division ?? ''}|${t.competition_level ?? ''}`;
     if (teamMap.has(key)) continue;
-    const hintParts = [t.state, t.competition_level].filter(Boolean) as string[];
+    const hintParts = [t.state, t.gender_division, t.competition_level].filter(Boolean) as string[];
     teamMap.set(key, {
       kind: 'team',
       id: t.id,

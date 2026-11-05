@@ -933,6 +933,39 @@ async function resolveTeam(
   return created.id;
 }
 
+/**
+ * USAU can list two squads under one name on one page (NY Minute 2026: two
+ * "Columbia University", seeds 4 and 5, no "(B)"). trg_reject_duplicate_event_team
+ * rejects the second participation, and that throw aborts every division of
+ * the event. So the best seed keeps the bare name and the rest become
+ * "Name (B)", "Name (C)"…, skipping a suffix another team on the page holds.
+ * This only names NEW rows: resolveTeam matches an existing row by
+ * EventTeamId first and never renames it.
+ */
+function disambiguateSameNameTeams(teams: ParsedTeam[]): void {
+  const key = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const groups = new Map<string, ParsedTeam[]>();
+  for (const t of teams) {
+    const k = key(t.displayName);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(t);
+  }
+  const taken = new Set(groups.keys());
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => (a.seed ?? Infinity) - (b.seed ?? Infinity));
+    let letter = 'B'.charCodeAt(0);
+    for (const t of group.slice(1)) {
+      let name: string;
+      do {
+        name = `${t.displayName} (${String.fromCharCode(letter++)})`;
+      } while (taken.has(key(name)));
+      taken.add(key(name));
+      t.displayName = name;
+    }
+  }
+}
+
 async function ensureEvent(
   db: ReturnType<typeof supabase>,
   slug: string,
@@ -1130,6 +1163,8 @@ async function persistSchedulePage(
     // caller see the zero count.
     return { teams: 0, games: 0, skipped: true };
   }
+
+  disambiguateSameNameTeams(teams);
 
   // Resolve every EventTeamId to a usau_teams uuid.
   const teamUUIDByEventTeamId = new Map<string, string>();
@@ -1508,9 +1543,12 @@ interface RequestBody {
   divisions?: Division[];
 }
 
-async function run(body: RequestBody) {
-  const slug = body.slug?.trim();
-  if (!slug) throw new Error('Request body must include { slug }');
+/** Checked in Deno.serve BEFORE withRunLogging, so a malformed request is
+ *  never logged as a scrape failure and can't count toward an alert. Returns
+ *  the error message when the request is invalid. */
+function validateBody(body: RequestBody | null): { slug: string; divisions: Division[] } | string {
+  const slug = body?.slug?.trim();
+  if (!slug) return 'Request body must include { slug }';
   // The function is public (verify_jwt=false) and the slug is spliced into
   // USAU URLs, source_url and a stub event row. A real slug is one path
   // segment; `\` and `%` are rejected too since fetch reads `\` as `/` and
@@ -1518,20 +1556,23 @@ async function run(body: RequestBody) {
   // Blocklist, not allowlist: real slugs carry curly quotes ("Surf-‘n-Turf").
   // 0 of 4,486 stored slugs (max length 87) trip any of these.
   if (slug.length > 120 || /[/?#\\%\s\x00-\x1f\x7f]/.test(slug) || /^\.+$/.test(slug)) {
-    throw new Error(`Invalid slug: ${JSON.stringify(slug)}`);
+    return `Invalid slug: ${JSON.stringify(slug)}`;
   }
   const DIVISIONS: readonly Division[] = ['Men', 'Mixed', 'Women'];
   if (
-    body.divisions !== undefined &&
-    (!Array.isArray(body.divisions) || body.divisions.some((d) => !DIVISIONS.includes(d)))
+    body!.divisions !== undefined &&
+    (!Array.isArray(body!.divisions) || body!.divisions.some((d) => !DIVISIONS.includes(d)))
   ) {
-    throw new Error(`Invalid divisions: ${JSON.stringify(body.divisions)}`);
+    return `Invalid divisions: ${JSON.stringify(body!.divisions)}`;
   }
 
-  const divisions: Division[] = body.divisions?.length
-    ? [...new Set(body.divisions)]
+  const divisions: Division[] = body!.divisions?.length
+    ? [...new Set(body!.divisions)]
     : ['Men', 'Women', 'Mixed'];
+  return { slug, divisions };
+}
 
+async function run(slug: string, divisions: Division[]) {
   const db = supabase();
   const eventUUID = await ensureEvent(db, slug);
 
@@ -1624,6 +1665,111 @@ async function run(body: RequestBody) {
   };
 }
 
+const ALERT_TO = 'huntermay@altiusapps.com';
+/** Failed runs in a row for one event before it alerts. */
+const ALERT_STREAK = 3;
+/** Emails a day across all events: a USAU outage fails every live event at once. */
+const ALERT_DAILY_CAP = 5;
+/** usau_scrape_runs job_name of the sent-alert marker rows. */
+const ALERT_JOB = 'sync-event-details-alert';
+
+/**
+ * Email when an event's last ALERT_STREAK completed scrapes all failed (NY
+ * Minute 2026 failed 54 times over two days before anyone noticed). At most
+ * one email per event per 24 h and ALERT_DAILY_CAP overall, tracked by marker
+ * rows in usau_scrape_runs, since the function is public and anyone can make
+ * it run. A failed send drops its marker, so the next failure retries. Only
+ * stored events alert, so a junk slug never
+ * reaches the inbox. Gap: runs killed at the walltime never complete, so an
+ * event that always times out doesn't alert.
+ */
+async function alertOnFailureStreak(slug: string, message: string): Promise<void> {
+  const db = supabase();
+  const { data: event, error: eventErr } = await db
+    .from('usau_events')
+    .select('usau_slug, name, start_date')
+    .eq('usau_slug', slug)
+    .maybeSingle();
+  if (eventErr) throw eventErr;
+  if (!event) return;
+
+  const { data: runs, error: runsErr } = await db
+    .from('usau_scrape_runs')
+    .select('error')
+    .eq('job_name', 'sync-event-details')
+    .eq('metadata->>slug', slug)
+    .not('completed_at', 'is', null)
+    .order('started_at', { ascending: false })
+    .limit(ALERT_STREAK);
+  if (runsErr) throw runsErr;
+  if ((runs ?? []).length < ALERT_STREAK || runs!.some((r) => r.error == null)) return;
+
+  // Claim before sending: concurrent failures (a USAU outage fails every live
+  // event on the same tick) would all pass a check-then-send. Insert our marker,
+  // then keep it only if it is this event's first and within the day's cap in
+  // one shared order.
+  const { data: mark, error: markErr } = await db
+    .from('usau_scrape_runs')
+    .insert({ job_name: ALERT_JOB, metadata: { slug: event.usau_slug } })
+    .select('id')
+    .single();
+  if (markErr) throw markErr;
+  const dropMark = async () => {
+    const { error } = await db.from('usau_scrape_runs').delete().eq('id', mark.id);
+    if (error) throw error;
+  };
+  const { data: marks, error: marksErr } = await db
+    .from('usau_scrape_runs')
+    .select('id, metadata')
+    .eq('job_name', ALERT_JOB)
+    .gte('started_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    .order('started_at', { ascending: true })
+    .order('id', { ascending: true });
+  if (marksErr) throw marksErr;
+  const firstForEvent =
+    (marks ?? []).find((r) => (r.metadata as { slug?: string } | null)?.slug === event.usau_slug)?.id ===
+    mark.id;
+  const withinCap = (marks ?? []).slice(0, ALERT_DAILY_CAP).some((r) => r.id === mark.id);
+  if (!firstForEvent || !withinCap) {
+    await dropMark();
+    return;
+  }
+
+  const apiKey = Deno.env.get('RESEND_API');
+  const from = Deno.env.get('SEND_EMAIL');
+  if (!apiKey || !from) {
+    console.error('[sync-event-details] alert not sent: RESEND_API / SEND_EMAIL not set');
+    await dropMark();
+    return;
+  }
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+    body: JSON.stringify({
+      from: `The Layout <${from}>`,
+      to: ALERT_TO,
+      subject: `⚠️ USAU scrape failing: ${event.name}`,
+      text:
+        `sync-event-details has failed ${ALERT_STREAK}+ runs in a row for ${event.name} ` +
+        `(starts ${event.start_date ?? 'TBD'}). Nothing from this event updates until it's fixed.\n\n` +
+        `Latest error:\n${message.slice(0, 500)}\n\n` +
+        `USAU page: ${BASE_URL}/events/${event.usau_slug}/\n` +
+        `Runs: usau_scrape_runs where job_name = 'sync-event-details' and metadata->>'slug' = '${event.usau_slug}'`,
+    }),
+  });
+  if (!res.ok) {
+    console.error('[sync-event-details] alert email failed:', res.status, await res.text());
+    await dropMark();
+    return;
+  }
+  const { error: doneErr } = await db
+    .from('usau_scrape_runs')
+    .update({ completed_at: new Date().toISOString(), rows_processed: 1 })
+    .eq('id', mark.id);
+  if (doneErr) throw doneErr;
+}
+
 Deno.serve(async (req) => {
   let body: RequestBody = {};
   try {
@@ -1638,14 +1784,20 @@ Deno.serve(async (req) => {
     // empty body OK if slug is in query
   }
 
+  const input = validateBody(body);
+  if (typeof input === 'string') {
+    return Response.json({ ok: false, error: input }, { status: 400 });
+  }
+
   try {
-    const res = await withRunLogging('sync-event-details', { slug: body.slug ?? null }, () =>
-      run(body),
+    const res = await withRunLogging('sync-event-details', { slug: input.slug }, () =>
+      run(input.slug, input.divisions),
     );
     return Response.json({ ok: true, ...res });
   } catch (err) {
     const message = formatErr(err);
     console.error('[sync-event-details] failed:', message);
+    await alertOnFailureStreak(input.slug, message);
     return Response.json({ ok: false, error: message }, { status: 500 });
   }
 });

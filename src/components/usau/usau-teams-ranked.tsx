@@ -15,6 +15,7 @@ import {
 import { listOfficialUsauRankingsCached, listUsauClubStandingsCached } from '@/lib/cached-readers';
 import type { UsauLevel } from '@/lib/league';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { UsauSectionHeaderNote } from '@/components/usau/usau-section-header-note';
 
 export async function UsauTeamsRanked({
   genderDivision,
@@ -73,33 +74,31 @@ export async function UsauTeamsRanked({
     (t) => t.nationalsPlacement == null && !t.rankedFromSlug?.includes('Nationals'),
   );
 
+  // Honest framing — we don't have computed final placements yet
+  // (USAU's schedule pages don't expose them, and we haven't
+  // derived them from bracket games). What we DO have is each
+  // team's entry seed at each event. Re-orderable to true finish
+  // once we add a placement-derivation pass. Shown behind the "i" on
+  // whichever section comes first.
+  const seedNote = (
+    <>
+      Currently ordered by entry seed at the {season} {madeNats.length > 0 ? 'Nationals' : 'Regionals'}.
+      Real finish-order (champion → last place) lands when we add bracket
+      derivation.
+    </>
+  );
+
   return (
     <div className="flex flex-col gap-7">
-      {/* Honest framing — we don't have computed final placements yet
-          (USAU's schedule pages don't expose them, and we haven't
-          derived them from bracket games). What we DO have is each
-          team's entry seed at each event. Re-orderable to true finish
-          once we add a placement-derivation pass. */}
-      <div className="text-[11px] font-medium text-faint font-tight bg-surface rounded-card-sm shadow-soft px-4 py-3">
-        <span className="font-bold text-muted uppercase tracking-[0.16em] text-[10px]">
-          Note ·
-        </span>{' '}
-        Currently ordered by entry seed at the {season} {madeNats.length > 0 ? 'Nationals' : 'Regionals'}.
-        Real finish-order (champion → last place) lands when we add bracket
-        derivation.
-      </div>
-
       {madeNats.length > 0 && (
         <section aria-labelledby="ranked-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
-          <h2
+          <UsauSectionHeaderNote
             id="ranked-heading"
-            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-          >
-            <span>{season} Nationals · by seed</span>
-            <span className="text-faint normal-case tracking-[0.1em]">
-              {madeNats.length} teams
-            </span>
-          </h2>
+            label={`${season} Nationals · by seed`}
+            count={`${madeNats.length} teams`}
+            noteLabel="Note"
+            note={seedNote}
+          />
           <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
             {madeNats.map((t, idx) => (
               <RankedRow
@@ -119,15 +118,25 @@ export async function UsauTeamsRanked({
 
       {others.length > 0 && (
         <section aria-labelledby="others-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
-          <h2
-            id="others-heading"
-            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-          >
-            <span>Other teams · {season} Regionals</span>
-            <span className="text-faint normal-case tracking-[0.1em]">
-              {others.length}
-            </span>
-          </h2>
+          {madeNats.length > 0 ? (
+            <h2
+              id="others-heading"
+              className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+            >
+              <span>Other teams · {season} Regionals</span>
+              <span className="text-faint normal-case tracking-[0.1em]">
+                {others.length}
+              </span>
+            </h2>
+          ) : (
+            <UsauSectionHeaderNote
+              id="others-heading"
+              label={`Other teams · ${season} Regionals`}
+              count={others.length}
+              noteLabel="Note"
+              note={seedNote}
+            />
+          )}
           <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
             {others.map((t, idx) => (
               <RankedRow
@@ -200,22 +209,19 @@ function ClubFinalStandings({
 }) {
   return (
     <div className="flex flex-col gap-7">
-      <div className="text-[11px] font-medium text-faint font-tight bg-surface rounded-card-sm shadow-soft px-4 py-3">
-        <span className="font-bold text-muted uppercase tracking-[0.16em] text-[10px]">
-          How it&rsquo;s ranked ·
-        </span>{' '}
-        Nationals finish first, then teams out at Regionals and Sectionals by how
-        close they came to a bid. USAU&rsquo;s final rating breaks ties.
-      </div>
-
       <section aria-labelledby="final-standings-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
-        <h2
+        <UsauSectionHeaderNote
           id="final-standings-heading"
-          className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-        >
-          <span>{data.season} Final standings</span>
-          <span className="text-faint normal-case tracking-[0.1em]">{data.teams.length} teams</span>
-        </h2>
+          label={`${data.season} Final standings`}
+          count={`${data.teams.length} teams`}
+          noteLabel="How it’s ranked"
+          note={
+            <>
+              Nationals finish first, then teams out at Regionals and Sectionals by how
+              close they came to a bid. USAU&rsquo;s final rating breaks ties.
+            </>
+          }
+        />
         <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
           {data.teams.map((t) => (
             <RankedRow

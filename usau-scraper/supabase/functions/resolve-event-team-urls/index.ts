@@ -71,6 +71,15 @@ function extractEventTeamIdsByName(html: string): Map<string, string> {
   return map;
 }
 
+/** Every EventTeamId linked on the page, duplicates of one name included. */
+function extractEventTeamIds(html: string): Set<string> {
+  const ids = new Set<string>();
+  const re = /<a[^>]*href="[^"]*EventTeamId=([^"&]+)[^"]*"[^>]*>[^<]+<\/a>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) ids.add(decodeURIComponent(m[1]));
+  return ids;
+}
+
 /** Team name → the seed printed beside it ("North Carolina (1)"), same keys as
  *  extractEventTeamIdsByName. First seeded occurrence wins. */
 function extractSeedsByName(html: string): Map<string, number> {
@@ -280,7 +289,7 @@ async function resolveOneEvent(
   // each gender's schedule URL separately.
   const { data: parts, error: loadErr } = await db
     .from('usau_event_teams')
-    .select('team_id, seed, usau_teams(name, gender_division)')
+    .select('team_id, seed, usau_event_team_id, usau_teams(name, gender_division)')
     .eq('event_id', eventUuid)
     .is('usau_event_team_url_id', null);
   if (loadErr) {
@@ -290,6 +299,7 @@ async function resolveOneEvent(
   type Part = {
     team_id: string;
     seed: number | null;
+    usau_event_team_id: string | null;
     usau_teams: { name: string; gender_division: string | null } | null;
   };
   const partsByGender = new Map<string, Part[]>();
@@ -333,6 +343,7 @@ async function resolveOneEvent(
       .filter((k): k is string => !!k);
 
     const byName = new Map<string, string>();
+    const pageIds = new Set<string>();
     let usedSlug: string | null = null;
     // The name-derived slug is a fetch path only — never our identity (see the
     // persist guard below).
@@ -434,6 +445,7 @@ async function resolveOneEvent(
         for (const [k, v] of extractEventTeamIdsByName(html)) {
           if (!byName.has(k)) byName.set(k, v);
         }
+        for (const id of extractEventTeamIds(html)) pageIds.add(id);
       }
       // Non-masters events have exactly one segment; masters events can stop
       // early once every wanted team has been seen on some level's page.
@@ -498,13 +510,22 @@ async function resolveOneEvent(
     }
 
     for (const p of genderParts) {
+      // HTML-scraped participations already store the page's EventTeamId (it
+      // equalled the url id on all 8,919 resolved rows, 2026-11-05). Use it
+      // when the page links it: a name match can't tell apart two squads USAU
+      // lists under one name (NY Minute 2026's two "Columbia University"; ours
+      // is "Columbia University (B)"). ultirzr rows hold a numeric id, never on
+      // the page, so they fall through to the name match.
+      const idOnPage = p.usau_event_team_id && pageIds.has(p.usau_event_team_id)
+        ? p.usau_event_team_id
+        : null;
       const name = p.usau_teams?.name;
       if (!name) {
         totalSkipped++;
         continue;
       }
       const lookupKey = name.toLowerCase().replace(/\s+/g, ' ').trim();
-      const urlId = byName.get(lookupKey);
+      const urlId = idOnPage ?? byName.get(lookupKey);
       if (!urlId) {
         totalSkipped++;
         continue;
